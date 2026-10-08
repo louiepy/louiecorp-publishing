@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Newsroom — LouieCorp</title>
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="description" content="Private LouieCorp newsroom. This page is not part of the public publication.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Playfair+Display:ital,wght@0,500;0,700;0,900;1,700&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="preload" href="../fonts/unifrakturmaguntia.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="../css/styles.css">
+</head>
+<body class="is-admin">
+  <div class="admin-edition">
+    <p>LouieCorp Newsroom</p>
+    <p>Editorial control</p>
+  </div>
+  <header class="admin-mast">
+    <div class="admin-mast-inner">
+      <div>
+        <a class="admin-wordmark" href="../index.html">LOUIECORP</a>
+        <p class="admin-mast-tag">Newsroom</p>
+      </div>
+      <div class="admin-mast-actions">
+        <button class="admin-btn ghost" id="signOutBtn" type="button" hidden>Sign out</button>
+        <a class="admin-btn ghost" href="../index.html">View publication</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="admin-shell">
+    <p class="notice" id="adminNotice" hidden></p>
+
+    <section class="admin-panel" id="setupPanel" hidden>
+      <p class="kicker">Connect Supabase</p>
+      <h1>Project setup</h1>
+      <p class="setup-copy">Paste the public project URL and anon key. Sign in afterwards with your admin user. Never use the service-role key in the browser.</p>
+      <form id="setupForm">
+        <div class="field">
+          <label for="supabaseUrl">Project URL</label>
+          <input id="supabaseUrl" type="url" placeholder="https://xxxx.supabase.co" required>
+        </div>
+        <div class="field">
+          <label for="supabaseKey">Anon public key</label>
+          <input id="supabaseKey" type="password" placeholder="eyJ..." required>
+        </div>
+        <div class="admin-buttons">
+          <button class="admin-btn solid" type="submit">Save connection</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="admin-panel" id="authPanel" hidden>
+      <p class="kicker">Private newsroom</p>
+      <h1>Sign in as editor</h1>
+      <p class="setup-copy">Use the administrator account already created in Supabase Authentication.</p>
+      <form id="loginForm">
+        <div class="field">
+          <label for="adminEmail">Email</label>
+          <input id="adminEmail" type="email" autocomplete="username" required>
+        </div>
+        <div class="field">
+          <label for="adminPassword">Password</label>
+          <input id="adminPassword" type="password" autocomplete="current-password" required>
+        </div>
+        <div class="admin-buttons">
+          <button class="admin-btn solid" type="submit">Sign in</button>
+          <button class="admin-btn ghost" id="changeSetupBtn" type="button">Change project</button>
+        </div>
+      </form>
+    </section>
+
+    <div id="dashboard" hidden>
+      <section class="admin-panel library-card" id="libraryView">
+        <div class="library-head">
+          <div>
+            <p class="kicker">The desk</p>
+            <h1>Article library</h1>
+            <p class="setup-copy">Drafts stay private. Published stories appear on LouieCorp automatically.</p>
+          </div>
+          <button class="admin-btn solid new-article-btn" id="newStoryBtn" type="button">New Article</button>
+        </div>
+        <div class="stats-grid" id="newsroomStats" hidden></div>
+        <div class="library-toolbar">
+          <label class="sr-only" for="libraryFilter">Filter stories</label>
+          <select id="libraryFilter">
+            <option value="all">All stories</option>
+            <option value="published">Published</option>
+            <option value="draft">Drafts</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table class="story-table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Category</th>
+                <th>Author</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="articleTableBody">
+              <tr><td colspan="6" class="list-empty">Sign in to load your stories.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="story-cards" id="articleCardList" hidden></div>
+      </section>
+
+      <section class="admin-panel editor-card" id="editorView" hidden>
+        <div class="editor-head">
+          <div>
+            <button class="text-link" id="backToLibraryBtn" type="button">Back to library</button>
+            <p class="kicker">Composer</p>
+            <h1 id="editorTitle">New Article</h1>
+            <p class="editor-status" id="editorStatus">Unsaved draft</p>
+          </div>
+        </div>
+        <form id="articleForm">
+          <div class="field">
+            <label for="title">Headline</label>
+            <input id="title" name="title" placeholder="Write a strong headline" required>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="category">Desk</label>
+              <select id="category" name="category" required></select>
+            </div>
+            <div class="field">
+              <label for="authorSelect">Author</label>
+              <select id="authorSelect" name="authorSelect">
+                <option value="">Sentongo. R. Louis</option>
+                <option value="__new">New author</option>
+              </select>
+            </div>
+          </div>
+
+          <fieldset class="author-block" id="authorBlock">
+            <legend>Author details</legend>
+            <p class="setup-copy">Reuse an existing byline, or add a new author. The same author can appear on multiple stories.</p>
+            <div class="field">
+              <label for="authorName">Author name</label>
+              <input id="authorName" name="authorName" placeholder="Name as it should appear on the story">
+            </div>
+            <div class="field">
+              <label for="authorTitle">Role / title</label>
+              <input id="authorTitle" name="authorTitle" placeholder="Correspondent, Editor, Contributor">
+            </div>
+            <div class="field">
+              <label for="authorBio">Author bio</label>
+              <textarea class="short" id="authorBio" name="authorBio" placeholder="Optional. A short professional note about the writer."></textarea>
+            </div>
+            <div class="field">
+              <label for="authorPhoto">Author profile photo</label>
+              <input id="authorPhoto" name="authorPhoto" type="file" accept="image/*">
+              <div class="author-preview" id="authorPreview"><span>No portrait selected</span></div>
+            </div>
+          </fieldset>
+
+          <div class="field">
+            <label for="excerpt">Deck / summary</label>
+            <textarea class="short" id="excerpt" name="excerpt" placeholder="One or two sentences that introduce the piece"></textarea>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="publishedAt">Publication date</label>
+              <input id="publishedAt" name="publishedAt" type="datetime-local">
+              <p class="file-note">Optional. Leave blank to use the time of first publication. Used on the article page and in search metadata.</p>
+            </div>
+            <div class="field">
+              <label for="tags">Tags / topics</label>
+              <input id="tags" name="tags" placeholder="Separate tags with commas, for example: institutions, law, faith">
+            </div>
+          </div>
+          <div class="field">
+            <label for="cover">Cover image</label>
+            <input id="cover" name="cover" type="file" accept="image/*">
+            <div class="cover-preview" id="coverPreview"><span>No cover selected yet</span></div>
+          </div>
+          <div class="field editorial-flags">
+            <label class="flag-check"><input id="featured" name="featured" type="checkbox"> Featured Story</label>
+            <label class="flag-check"><input id="editorsPick" name="editorsPick" type="checkbox"> Editor’s Pick</label>
+            <label class="flag-check"><input id="isBreaking" name="isBreaking" type="checkbox"> Breaking News</label>
+          </div>
+          <div class="field">
+            <label for="document">Optional source PDF</label>
+            <input id="document" name="document" type="file" accept="application/pdf,.pdf">
+            <p class="file-note" id="documentNote">A newspaper-style PDF is generated automatically on publish. Use this only for an extra source document.</p>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="sourceCredit">Source / reference</label>
+              <input id="sourceCredit" name="sourceCredit" placeholder="Optional. Named source or original publication">
+            </div>
+            <div class="field">
+              <label for="sourceUrl">Source URL</label>
+              <input id="sourceUrl" name="sourceUrl" type="url" placeholder="https://">
+            </div>
+          </div>
+          <div class="field">
+            <label for="body">Full article body</label>
+            <textarea id="body" name="body" placeholder="Write the full essay. Use a blank line between paragraphs. Start a line with ## for a subheading, or > for a pull quote." required></textarea>
+          </div>
+          <input type="hidden" id="statusField" name="status" value="draft">
+          <input type="hidden" id="slugField" name="slug" value="">
+          <div class="admin-buttons">
+            <button class="admin-btn ghost" type="submit" data-status="draft">Save draft</button>
+            <button class="admin-btn solid" type="submit" data-status="published">Publish</button>
+            <button class="admin-btn ghost" id="unpublishBtn" type="button" hidden>Unpublish</button>
+            <button class="admin-btn danger" id="deleteBtn" type="button" hidden>Delete</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="../js/config.js"></script>
+  <script src="../js/supabase-client.js"></script>
+  <script src="../js/pdf.js"></script>
+  <script src="../js/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#161616">
+  <title>Offline — LouieCorp</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <style>
+    :root {
+      --paper: #f6f3ec;
+      --ink: #161616;
+      --muted: #5d5851;
+      --accent: #7a1f24;
+      --rule: #c9c2b6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 20px;
+      font-family: "Georgia", "Times New Roman", Times, serif;
+      color: var(--ink);
+      background: var(--paper);
+      text-align: center;
+    }
+    .card {
+      max-width: 28rem;
+      width: 100%;
+      border-top: 3px double var(--ink);
+      border-bottom: 1px solid var(--rule);
+      padding: 36px 16px 40px;
+    }
+    .wordmark {
+      font-size: 1.85rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+    .rule {
+      width: 72px;
+      height: 2px;
+      background: var(--ink);
+      margin: 18px auto 8px;
+    }
+    .rule-thin {
+      width: 72px;
+      height: 1px;
+      background: var(--ink);
+      margin: 0 auto 22px;
+    }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+      letter-spacing: -0.01em;
+    }
+    p {
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 0.95rem;
+      line-height: 1.55;
+      color: var(--muted);
+      margin-bottom: 22px;
+    }
+    a.btn {
+      display: inline-block;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      text-decoration: none;
+      color: var(--paper);
+      background: var(--ink);
+      padding: 12px 20px;
+      border: 1px solid var(--ink);
+    }
+    a.btn:hover { background: var(--accent); border-color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <p class="wordmark">LouieCorp</p>
+    <div class="rule"></div>
+    <div class="rule-thin"></div>
+    <h1>You're offline</h1>
+    <p>Reconnect to the internet to read the latest from LouieCorp.</p>
+    <a class="btn" href="/">Try homepage</a>
+  </div>
+</body>
+</html>

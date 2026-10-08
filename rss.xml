@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>LouieCorp Publishing</title>
+    <link>https://louiecorp.com/</link>
+    <description>Independent news and public affairs from LouieCorp Publishing.</description>
+    <language>en-gb</language>
+    <lastBuildDate>Tue, 07 Oct 2026 00:00:00 GMT</lastBuildDate>
+    <item>
+      <title>LouieCorp Publishing</title>
+      <link>https://louiecorp.com/</link>
+      <guid>https://louiecorp.com/</guid>
+      <description>Independent coverage of politics, business, technology, Africa, world affairs, society, culture, opinion and investigations.</description>
+    </item>
+  </channel>
+</rss>
