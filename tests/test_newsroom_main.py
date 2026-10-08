@@ -209,6 +209,80 @@ class MainFlowTests(unittest.TestCase):
 
         self.assertEqual(1, code)
 
+    def test_rejects_generated_article_shorter_than_500_words(self):
+        run = {'id': 'run-1'}
+        article = {
+            'title': 'UN Child Rights Committee Calls for Free Pre-Primary Education in Uganda',
+            'excerpt': 'A short excerpt',
+            'content_html': '<p>' + ('word ' * 120) + '</p>',
+            'category': 'World',
+            'image_query': 'Kampala school',
+            'image_caption': 'Caption',
+        }
+        candidates = [{
+            'title': 'UN Child Rights Committee Calls for Free Pre-Primary Education in Uganda - Human Rights Watch',
+            'url': 'https://example.com/one',
+            'description': 'desc',
+            'track': 'news',
+        }]
+        sources_good = [
+            {
+                'title': 'One',
+                'url': 'https://pub1.example/article',
+                'publisher': 'pub1.example',
+                'retrieved_at': '2026-01-01T00:00:00+00:00',
+                'text': 'x' * 300,
+            },
+            {
+                'title': 'Two',
+                'url': 'https://pub2.example/article',
+                'publisher': 'pub2.example',
+                'retrieved_at': '2026-01-01T00:01:00+00:00',
+                'text': 'y' * 300,
+            },
+        ]
+
+        with patch(
+            'newsroom.main.automated_today',
+            return_value=[],
+        ), patch(
+            'newsroom.main.uganda_done_today',
+            return_value=True,
+        ), patch(
+            'newsroom.main.candidate_is_eligible',
+            side_effect=lambda candidate, *_args, **_kwargs: (
+                candidate.setdefault(
+                    'importance_score',
+                    80,
+                )
+                or True
+            ),
+        ), patch(
+            'newsroom.main.discover',
+            return_value=candidates,
+        ), patch(
+            'newsroom.main.find_duplicate',
+            return_value=None,
+        ), patch(
+            'newsroom.main.research',
+            return_value=sources_good,
+        ), patch(
+            'newsroom.main.generate',
+            return_value=article,
+        ), patch(
+            'newsroom.main.log_run',
+            return_value=run,
+        ), patch(
+            'newsroom.main.log_candidate',
+            return_value={'id': 'candidate-1'},
+        ), patch(
+            'newsroom.supabase.rest',
+            return_value=[],
+        ):
+            code = newsroom_main.main('news')
+
+        self.assertEqual(1, code)
+
 
 if __name__ == '__main__':
     unittest.main()

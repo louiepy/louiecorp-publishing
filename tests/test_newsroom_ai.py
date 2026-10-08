@@ -82,6 +82,31 @@ class GeminiIntegrationTests(unittest.TestCase):
         self.assertIn('not found', message.lower())
         self.assertNotIn('\x1f\x8b', message)
 
+    def test_prompt_requires_publication_length(self):
+        with patch(
+            'newsroom.ai.GEMINI_API_KEY',
+            'test-key',
+        ), patch(
+            'newsroom.ai.request',
+            return_value=(
+                200,
+                {'Content-Type': 'application/json'},
+                gemini_success_body(),
+            ),
+        ) as request_mock, patch(
+            'newsroom.ai.time.sleep',
+        ):
+            ai.generate({'candidate': {}}, 'news')
+
+        payload = request_mock.call_args.kwargs['data']
+        prompt = payload['contents'][0]['parts'][0]['text']
+        self.assertIn('at least 700 words', prompt)
+        self.assertIn('complete newspaper-style article', prompt)
+        self.assertEqual(
+            8192,
+            payload['generationConfig']['maxOutputTokens'],
+        )
+
 
 def gemini_success_body():
     article = {
