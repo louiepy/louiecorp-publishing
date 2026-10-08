@@ -367,6 +367,28 @@ def candidate_is_eligible(
     return True
 
 
+def is_editorial_skip_error(error):
+    if not isinstance(error, RuntimeError):
+        return False
+
+    message = str(error or '')
+
+    markers = [
+        'No Uganda candidate was found',
+        'No sufficiently important',
+        'No suitable candidate with at least two independent usable sources was found.',
+        'Generated article is too short for publication.',
+        'No properly licensed real photograph was found.',
+        'Duplicate detected after writing.',
+        'Selected story does not satisfy the required daily Uganda publication.',
+    ]
+
+    return any(
+        marker in message
+        for marker in markers
+    )
+
+
 def main(mode='auto'):
     runs = automated_today()
 
@@ -847,6 +869,13 @@ def main(mode='auto'):
             'NEWSROOM ERROR:',
             error,
         )
+
+        if is_editorial_skip_error(error):
+            print(
+                'NEWSROOM SKIP: expected editorial '
+                'gating condition; slot skipped.'
+            )
+            return 0
 
         traceback.print_exc()
 
