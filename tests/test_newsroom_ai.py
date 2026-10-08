@@ -51,6 +51,10 @@ class GeminiIntegrationTests(unittest.TestCase):
             "'gemini-3.8-flash'",
             source,
         )
+        self.assertIn(
+            "'gemini-3.5-flash-lite'",
+            source,
+        )
 
     def test_generate_raises_readable_gemini_error(self):
         payload = (
@@ -190,6 +194,12 @@ class GeminiRetryTests(unittest.TestCase):
             'newsroom.ai.GEMINI_API_KEY',
             'test-key',
         ), patch(
+            'newsroom.ai.GEMINI_MODEL',
+            'gemini-3.8-flash',
+        ), patch(
+            'newsroom.ai.GEMINI_FALLBACK_MODEL',
+            'gemini-3.8-flash',
+        ), patch(
             'newsroom.ai.request',
             return_value=unavailable,
         ) as request_mock, patch(
@@ -233,6 +243,207 @@ class GeminiRetryTests(unittest.TestCase):
         self.assertIn('Gemini 404', str(caught.exception))
         self.assertEqual(1, request_mock.call_count)
         sleep_mock.assert_not_called()
+
+
+def requested_model(call):
+    url = call.args[0] if call.args else call.kwargs.get('url', '')
+    return url.split('/models/', 1)[-1].split(':', 1)[0]
+
+
+class GeminiFallbackTests(unittest.TestCase):
+
+    def test_primary_succeeds_without_fallback(self):
+        with patch(
+            'newsroom.ai.GEMINI_API_KEY',
+            'test-key',
+        ), patch(
+            'newsroom.ai.GEMINI_MODEL',
+            'gemini-3.8-flash',
+        ), patch(
+            'newsroom.ai.GEMINI_FALLBACK_MODEL',
+            'gemini-3.5-flash-lite',
+        ), patch(
+            'newsroom.ai.request',
+            return_value=(
+                200,
+                {'Content-Type': 'application/json'},
+                gemini_success_body(),
+            ),
+        ) as request_mock, patch(
+            'newsroom.ai.time.sleep',
+        ) as sleep_mock:
+            article = ai.generate({'candidate': {}}, 'news')
+
+        self.assertEqual('Verified title', article['title'])
+        self.assertEqual(1, request_mock.call_count)
+        self.assertEqual(
+            'gemini-3.8-flash',
+            requested_model(request_mock.call_args_list[0]),
+        )
+        sleep_mock.assert_not_called()
+
+    def test_primary_503s_then_fallback_succeeds(self):
+        unavailable = (
+            503,
+            {'Content-Type': 'application/json'},
+            gemini_error_body(
+                503,
+                'This model is currently experiencing high demand.',
+                'UNAVAILABLE',
+            ),
+        )
+        responses = [unavailable] * ai.MAX_ATTEMPTS + [(
+            200,
+            {'Content-Type': 'application/json'},
+            gemini_success_body(),
+        )]
+        with patch(
+            'newsroom.ai.GEMINI_API_KEY',
+            'test-key',
+        ), patch(
+            'newsroom.ai.GEMINI_MODEL',
+            'gemini-3.8-flash',
+        ), patch(
+            'newsroom.ai.GEMINI_FALLBACK_MODEL',
+            'gemini-3.5-flash-lite',
+        ), patch(
+            'newsroom.ai.request',
+            side_effect=responses,
+        ) as request_mock, patch(
+            'newsroom.ai.time.sleep',
+        ):
+            article = ai.generate({'candidate': {}}, 'news')
+
+        self.assertEqual('Verified title', article['title'])
+        self.assertEqual(ai.MAX_ATTEMPTS + 1, request_mock.call_count)
+        models = [
+            requested_model(call)
+            for call in request_mock.call_args_list
+        ]
+        self.assertEqual(
+            ['gemini-3.8-flash'] * ai.MAX_ATTEMPTS,
+            models[:-1],
+        )
+        self.assertEqual('gemini-3.5-flash-lite', models[-1])
+
+    def test_primary_429s_then_fallback_succeeds(self):
+        exhausted = (
+            429,
+            {'Content-Type': 'application/json'},
+            gemini_error_body(
+                429,
+                'Resource exhausted',
+                'RESOURCE_EXHAUSTED',
+            ),
+        )
+        responses = [exhausted] * ai.MAX_ATTEMPTS + [(
+            200,
+            {'Content-Type': 'application/json'},
+            gemini_success_body(),
+        )]
+        with patch(
+            'newsroom.ai.GEMINI_API_KEY',
+            'test-key',
+        ), patch(
+            'newsroom.ai.GEMINI_MODEL',
+            'gemini-3.8-flash',
+        ), patch(
+            'newsroom.ai.GEMINI_FALLBACK_MODEL',
+            'gemini-3.5-flash-lite',
+        ), patch(
+            'newsroom.ai.request',
+            side_effect=responses,
+        ) as request_mock, patch(
+            'newsroom.ai.time.sleep',
+        ):
+            article = ai.generate({'candidate': {}}, 'news')
+
+        self.assertEqual('Verified title', article['title'])
+        self.assertEqual(ai.MAX_ATTEMPTS + 1, request_mock.call_count)
+        self.assertEqual(
+            'gemini-3.5-flash-lite',
+            requested_model(request_mock.call_args_list[-1]),
+        )
+
+    def test_primary_404_does_not_invoke_fallback(self):
+        payload = gemini_error_body(
+            404,
+            'models/gemini-3.8-flash is not found for API version v1beta',
+            'NOT_FOUND',
+        )
+        with patch(
+            'newsroom.ai.GEMINI_API_KEY',
+            'test-key',
+        ), patch(
+            'newsroom.ai.GEMINI_MODEL',
+            'gemini-3.8-flash',
+        ), patch(
+            'newsroom.ai.GEMINI_FALLBACK_MODEL',
+            'gemini-3.5-flash-lite',
+        ), patch(
+            'newsroom.ai.request',
+            return_value=(
+                404,
+                {'Content-Type': 'application/json'},
+                payload,
+            ),
+        ) as request_mock, patch(
+            'newsroom.ai.time.sleep',
+        ) as sleep_mock:
+            with self.assertRaises(RuntimeError) as caught:
+                ai.generate({'candidate': {}}, 'news')
+
+        self.assertIn('Gemini 404', str(caught.exception))
+        self.assertEqual(1, request_mock.call_count)
+        self.assertEqual(
+            'gemini-3.8-flash',
+            requested_model(request_mock.call_args_list[0]),
+        )
+        sleep_mock.assert_not_called()
+
+    def test_both_primary_and_fallback_fail(self):
+        unavailable = (
+            503,
+            {'Content-Type': 'application/json'},
+            gemini_error_body(
+                503,
+                'This model is currently experiencing high demand.',
+                'UNAVAILABLE',
+            ),
+        )
+        with patch(
+            'newsroom.ai.GEMINI_API_KEY',
+            'test-key',
+        ), patch(
+            'newsroom.ai.GEMINI_MODEL',
+            'gemini-3.8-flash',
+        ), patch(
+            'newsroom.ai.GEMINI_FALLBACK_MODEL',
+            'gemini-3.5-flash-lite',
+        ), patch(
+            'newsroom.ai.request',
+            return_value=unavailable,
+        ) as request_mock, patch(
+            'newsroom.ai.time.sleep',
+        ) as sleep_mock:
+            with self.assertRaises(RuntimeError) as caught:
+                ai.generate({'candidate': {}}, 'news')
+
+        message = str(caught.exception)
+        self.assertIn('gemini-3.8-flash', message)
+        self.assertIn('gemini-3.5-flash-lite', message)
+        self.assertIn('temporarily unavailable', message)
+        self.assertEqual(ai.MAX_ATTEMPTS * 2, request_mock.call_count)
+        self.assertEqual((ai.MAX_ATTEMPTS - 1) * 2, sleep_mock.call_count)
+        models = [
+            requested_model(call)
+            for call in request_mock.call_args_list
+        ]
+        self.assertEqual(
+            ['gemini-3.8-flash'] * ai.MAX_ATTEMPTS
+            + ['gemini-3.5-flash-lite'] * ai.MAX_ATTEMPTS,
+            models,
+        )
 
 
 class GzipDecodeTests(unittest.TestCase):
