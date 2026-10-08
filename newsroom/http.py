@@ -8,6 +8,55 @@ from html.parser import HTMLParser
 from .config import USER_AGENT
 
 
+def decode_body(raw_body, headers=None):
+    headers = headers or {}
+    body = raw_body or b''
+    encoding = str(
+        headers.get('Content-Encoding')
+        or headers.get('content-encoding')
+        or ''
+    ).lower().strip()
+
+    try:
+        if (
+            encoding == 'gzip'
+            or body.startswith(b'\x1f\x8b')
+        ):
+            body = zlib.decompress(
+                body,
+                16 + zlib.MAX_WBITS,
+            )
+
+        elif encoding == 'deflate':
+            try:
+                body = zlib.decompress(body)
+            except zlib.error:
+                body = zlib.decompress(
+                    body,
+                    -zlib.MAX_WBITS,
+                )
+
+    except zlib.error:
+        return raw_body or b''
+
+    return body
+
+
+def body_text(raw_body, headers=None, limit=None):
+    text = decode_body(
+        raw_body,
+        headers,
+    ).decode(
+        'utf-8',
+        'replace',
+    )
+
+    if limit is not None:
+        return text[:limit]
+
+    return text
+
+
 def request(
     url,
     method='GET',
@@ -60,42 +109,13 @@ def request(
             response_headers = response.headers
             raw_body = response.read()
 
-            encoding = (
-                response_headers.get(
-                    'Content-Encoding',
-                    ''
-                )
-                .lower()
-                .strip()
-            )
-
-            try:
-                if encoding == 'gzip':
-                    raw_body = zlib.decompress(
-                        raw_body,
-                        16 + zlib.MAX_WBITS,
-                    )
-
-                elif encoding == 'deflate':
-                    try:
-                        raw_body = zlib.decompress(
-                            raw_body
-                        )
-                    except zlib.error:
-                        raw_body = zlib.decompress(
-                            raw_body,
-                            -zlib.MAX_WBITS,
-                        )
-
-            except zlib.error:
-                # Leave the original response intact if the
-                # server advertised compression incorrectly.
-                pass
-
             return (
                 status,
                 response_headers,
-                raw_body,
+                decode_body(
+                    raw_body,
+                    response_headers,
+                ),
             )
 
     except urllib.error.HTTPError as error:
@@ -107,7 +127,10 @@ def request(
         return (
             error.code,
             error.headers,
-            body,
+            decode_body(
+                body,
+                error.headers,
+            ),
         )
 
     except (
@@ -157,15 +180,12 @@ def get_json(
     if status >= 400:
         raise RuntimeError(
             f'HTTP {status}: '
-            f'{body[:500].decode("utf-8", "replace")}'
+            f'{body_text(body, limit=500)}'
         )
 
     try:
         return json.loads(
-            body.decode(
-                'utf-8',
-                'replace',
-            )
+            body_text(body)
         )
     except json.JSONDecodeError as error:
         raise RuntimeError(
