@@ -1,4 +1,5 @@
 import gzip
+import json
 import os
 import unittest
 from unittest.mock import patch
@@ -76,6 +77,162 @@ class GeminiIntegrationTests(unittest.TestCase):
         self.assertIn('Gemini 404', message)
         self.assertIn('not found', message.lower())
         self.assertNotIn('\x1f\x8b', message)
+
+
+def gemini_success_body():
+    article = {
+        'title': 'Verified title',
+        'excerpt': 'Verified excerpt',
+        'category': 'World',
+        'tags': ['uganda'],
+        'content_html': '<p>body</p>',
+        'image_query': 'Kampala parliament',
+        'image_caption': 'Caption',
+        'image_alt': 'Alt',
+        'source_credit': 'Example',
+    }
+    return json.dumps({
+        'candidates': [{
+            'content': {
+                'parts': [{'text': json.dumps(article)}],
+            },
+        }],
+    }).encode('utf-8')
+
+
+def gemini_error_body(code, message, status_name):
+    return json.dumps({
+        'error': {
+            'code': code,
+            'message': message,
+            'status': status_name,
+        },
+    }).encode('utf-8')
+
+
+class GeminiRetryTests(unittest.TestCase):
+
+    def test_retries_503_then_succeeds(self):
+        responses = [
+            (
+                503,
+                {'Content-Type': 'application/json'},
+                gemini_error_body(
+                    503,
+                    'This model is currently experiencing high demand.',
+                    'UNAVAILABLE',
+                ),
+            ),
+            (
+                200,
+                {'Content-Type': 'application/json'},
+                gemini_success_body(),
+            ),
+        ]
+        with patch(
+            'newsroom.ai.GEMINI_API_KEY',
+            'test-key',
+        ), patch(
+            'newsroom.ai.request',
+            side_effect=responses,
+        ) as request_mock, patch(
+            'newsroom.ai.time.sleep',
+        ) as sleep_mock:
+            article = ai.generate({'candidate': {}}, 'news')
+
+        self.assertEqual('Verified title', article['title'])
+        self.assertEqual(2, request_mock.call_count)
+        sleep_mock.assert_called_once_with(2)
+
+    def test_retries_429_then_succeeds(self):
+        responses = [
+            (
+                429,
+                {'Content-Type': 'application/json'},
+                gemini_error_body(
+                    429,
+                    'Resource exhausted',
+                    'RESOURCE_EXHAUSTED',
+                ),
+            ),
+            (
+                200,
+                {'Content-Type': 'application/json'},
+                gemini_success_body(),
+            ),
+        ]
+        with patch(
+            'newsroom.ai.GEMINI_API_KEY',
+            'test-key',
+        ), patch(
+            'newsroom.ai.request',
+            side_effect=responses,
+        ) as request_mock, patch(
+            'newsroom.ai.time.sleep',
+        ) as sleep_mock:
+            article = ai.generate({'candidate': {}}, 'news')
+
+        self.assertEqual('Verified title', article['title'])
+        self.assertEqual(2, request_mock.call_count)
+        sleep_mock.assert_called_once_with(2)
+
+    def test_repeated_503_fails_after_bounded_retries(self):
+        unavailable = (
+            503,
+            {'Content-Type': 'application/json'},
+            gemini_error_body(
+                503,
+                'This model is currently experiencing high demand.',
+                'UNAVAILABLE',
+            ),
+        )
+        with patch(
+            'newsroom.ai.GEMINI_API_KEY',
+            'test-key',
+        ), patch(
+            'newsroom.ai.request',
+            return_value=unavailable,
+        ) as request_mock, patch(
+            'newsroom.ai.time.sleep',
+        ) as sleep_mock:
+            with self.assertRaises(RuntimeError) as caught:
+                ai.generate({'candidate': {}}, 'news')
+
+        message = str(caught.exception)
+        self.assertIn('temporarily unavailable', message)
+        self.assertIn('503', message)
+        self.assertEqual(ai.MAX_ATTEMPTS, request_mock.call_count)
+        self.assertEqual(ai.MAX_ATTEMPTS - 1, sleep_mock.call_count)
+        self.assertEqual(
+            [((2,),), ((4,),), ((8,),)],
+            sleep_mock.call_args_list,
+        )
+
+    def test_404_fails_without_retrying(self):
+        payload = gemini_error_body(
+            404,
+            'models/gemini-2.5-flash is not found for API version v1beta',
+            'NOT_FOUND',
+        )
+        with patch(
+            'newsroom.ai.GEMINI_API_KEY',
+            'test-key',
+        ), patch(
+            'newsroom.ai.request',
+            return_value=(
+                404,
+                {'Content-Type': 'application/json'},
+                payload,
+            ),
+        ) as request_mock, patch(
+            'newsroom.ai.time.sleep',
+        ) as sleep_mock:
+            with self.assertRaises(RuntimeError) as caught:
+                ai.generate({'candidate': {}}, 'news')
+
+        self.assertIn('Gemini 404', str(caught.exception))
+        self.assertEqual(1, request_mock.call_count)
+        sleep_mock.assert_not_called()
 
 
 class GzipDecodeTests(unittest.TestCase):
