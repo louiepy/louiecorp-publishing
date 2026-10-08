@@ -14,6 +14,7 @@ jobs:
   newsroom:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+
     steps:
       - name: Check out LouieCorp
         uses: actions/checkout@v4
@@ -24,7 +25,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install PDF library
-        run: python -m pip install --upgrade pip && pip install fpdf2 pillow
+        run: |
+          python -m pip install --upgrade pip
+          pip install fpdf2 pillow
 
       - name: Run newsroom
         env:
@@ -32,11 +35,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           NEWSROOM_EDITOR_USER_ID: ${{ secrets.NEWSROOM_EDITOR_USER_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: gemini-2.5-flash
           MEDIA_WORKER_URL: ${{ secrets.MEDIA_WORKER_URL }}
           MEDIA_BOT_SECRET: ${{ secrets.MEDIA_BOT_SECRET }}
-          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
-          MAX_DAILY_AUTOMATED: '3'
-          MIN_IMPORTANCE: '68'
-          AUTO_PUBLISH: 'true'
-        run: python -m newsroom.main --mode auto
+          AUTO_PUBLISH: "true"
+        run: python -m newsroom.main
