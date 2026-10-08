@@ -29,6 +29,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install fpdf2 pillow
 
+      - name: Verify media bot secret is present
+        env:
+          MEDIA_BOT_SECRET: ${{ secrets.MEDIA_BOT_SECRET }}
+        run: |
+          if [ -z "${MEDIA_BOT_SECRET}" ]; then
+            echo "GitHub Actions secret MEDIA_BOT_SECRET is missing." >&2
+            exit 1
+          fi
+
       - name: Run newsroom
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

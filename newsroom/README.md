@@ -32,11 +32,19 @@ Run `supabase/migrations/20261008_newsroom.sql` once. It adds the newsroom audit
 
 ## Cloudflare setup
 
-Set the Worker secret once:
+Set the production Worker secret once, using the exact same value as the GitHub Actions secret `MEDIA_BOT_SECRET`:
 
-`wrangler secret put MEDIA_BOT_SECRET`
+```
+npx wrangler secret put MEDIA_BOT_SECRET --name louiecorp
+```
 
-Use the same random value as the GitHub Actions secret.
+Then redeploy the Worker from `worker/`:
+
+```
+npx wrangler deploy
+```
+
+A missing Worker secret now fails closed with HTTP 500 (`MEDIA_BOT_SECRET is not configured on the Worker.`). A present but mismatched secret still returns HTTP 401 (`Bot authentication failed.`). Never put the value in `wrangler.toml` or browser JavaScript.
 
 ## First test
 

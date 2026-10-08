@@ -10,4 +10,7 @@ bucket_name = "louiecorp-media"
 SUPABASE_URL = "https://faramhlfahpwhlruvcvf.supabase.co"
 SUPABASE_ANON_KEY = "sb_publishable_mneKRXQTxMCXtO9j1RQW4A_73Y1QSZN"
 
-# Set with: wrangler secret put MEDIA_BOT_SECRET
+# Required secret. Do not put the value here.
+# Deploy fails closed at request time with HTTP 500 if this secret is missing:
+#   npx wrangler secret put MEDIA_BOT_SECRET
+# The GitHub Actions secret MEDIA_BOT_SECRET must be the exact same value.

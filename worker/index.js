@@ -142,11 +142,22 @@ async function handleBotPdf(request, env, key) {
   return json({ ok: true, key, url: `${new URL(request.url).origin}/media/${key}` }, 200);
 }
 
+export function authenticateBot(env, authorizationHeader) {
+  const secret = String((env && env.MEDIA_BOT_SECRET) || '').trim();
+  const supplied = String(authorizationHeader || '').replace(/^Bearer\s+/i, '').trim();
+  if (!secret) {
+    return { ok: false, status: 500, error: 'MEDIA_BOT_SECRET is not configured on the Worker.' };
+  }
+  if (!supplied || supplied !== secret) {
+    return { ok: false, status: 401, error: 'Bot authentication failed.' };
+  }
+  return { ok: true };
+}
+
 async function handleBotMedia(request, env, pathname) {
   if (request.method !== 'PUT') return json({ error: 'Method not allowed.' }, 405);
-  const secret = String(env.MEDIA_BOT_SECRET || '');
-  const supplied = String(request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
-  if (!secret || !supplied || supplied !== secret) return json({ error: 'Bot authentication failed.' }, 401);
+  const auth = authenticateBot(env, request.headers.get('Authorization'));
+  if (!auth.ok) return json({ error: auth.error }, auth.status);
   const pdfMatch = String(pathname || '').match(/^\/bot-media\/(pdfs\/[a-zA-Z0-9._-]+)$/);
   if (pdfMatch) return handleBotPdf(request, env, pdfMatch[1]);
   const match = String(pathname || '').match(/^\/bot-media\/(covers\/[a-zA-Z0-9._-]+)$/);

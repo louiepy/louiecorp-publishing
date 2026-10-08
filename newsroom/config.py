@@ -6,8 +6,8 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ['SUPABASE_SERVICE_ROLE_KEY']
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-3.8-flash') or 'gemini-3.8-flash'
 GEMINI_FALLBACK_MODEL = os.getenv('GEMINI_FALLBACK_MODEL', 'gemini-3.5-flash-lite') or 'gemini-3.5-flash-lite'
-MEDIA_WORKER_URL = os.getenv('MEDIA_WORKER_URL', 'https://louiecorp.louievolt.workers.dev').rstrip('/')
-MEDIA_BOT_SECRET = os.environ.get('MEDIA_BOT_SECRET', '')
+MEDIA_WORKER_URL = (os.getenv('MEDIA_WORKER_URL') or 'https://louiecorp.louievolt.workers.dev').strip().rstrip('/')
+MEDIA_BOT_SECRET = os.environ.get('MEDIA_BOT_SECRET', '').strip()
 UNSPLASH_ACCESS_KEY = os.environ.get('UNSPLASH_ACCESS_KEY', '')
 MAX_DAILY_AUTOMATED = int(os.getenv('MAX_DAILY_AUTOMATED', '3'))
 AUTO_PUBLISH = os.getenv('AUTO_PUBLISH', 'false').lower() == 'true'
