@@ -57,11 +57,17 @@ class ResearchTests(unittest.TestCase):
             ).netloc.lower()
             if 'news.google.com/rss/search' in url:
                 return 200, {}, rss.encode('utf-8')
-            if host.endswith('monitor.co.ug'):
+            if host in {
+                'monitor.co.ug',
+                'www.monitor.co.ug',
+            }:
                 return 200, {'Content-Type': 'text/html'}, long_html('Monitor reporting')
-            if host.endswith('reuters.com'):
+            if host in {
+                'reuters.com',
+                'www.reuters.com',
+            }:
                 return 200, {'Content-Type': 'text/html'}, long_html('Reuters reporting')
-            if host.endswith('gdeltproject.org'):
+            if host == 'api.gdeltproject.org':
                 return 200, {}, b'{"articles":[]}'
             return 404, {}, b''
 
@@ -137,11 +143,15 @@ class ResearchTests(unittest.TestCase):
             if 'news.google.com/rss/search' in url:
                 return 200, {}, rss.encode('utf-8')
             if (
-                host.endswith('newvision.co.ug')
-                or host.endswith('theeastafrican.co.ke')
+                host in {
+                    'newvision.co.ug',
+                    'www.newvision.co.ug',
+                    'theeastafrican.co.ke',
+                    'www.theeastafrican.co.ke',
+                }
             ):
                 return 403, {'Content-Type': 'text/html'}, b''
-            if host.endswith('gdeltproject.org'):
+            if host == 'api.gdeltproject.org':
                 return 200, {}, b'{"articles":[]}'
             return 404, {}, b''
 
