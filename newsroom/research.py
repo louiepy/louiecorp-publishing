@@ -60,12 +60,11 @@ def fetch_article(url):
 
 def research(candidate, max_sources=6):
     sources = []
-    seen = set()
+    seen_urls = set()
 
-    # Original discovered candidate.
     add_source(
         sources,
-        seen,
+        seen_urls,
         candidate.get('title', ''),
         candidate.get('url', ''),
         candidate.get('description', ''),
@@ -75,7 +74,6 @@ def research(candidate, max_sources=6):
 
     query = urllib.parse.quote(candidate.get('title', ''))
 
-    # Google News RSS.
     google_url = (
         'https://news.google.com/rss/search?q='
         + query
@@ -111,7 +109,7 @@ def research(candidate, max_sources=6):
 
                 add_source(
                     sources,
-                    seen,
+                    seen_urls,
                     title,
                     url,
                     description,
@@ -125,7 +123,6 @@ def research(candidate, max_sources=6):
     except Exception as exc:
         print('Google News warning:', exc)
 
-    # GDELT.
     if len(sources) < max_sources:
         try:
             gdelt_url = (
@@ -144,7 +141,7 @@ def research(candidate, max_sources=6):
                 for item in data.get('articles', []):
                     add_source(
                         sources,
-                        seen,
+                        seen_urls,
                         item.get('title', ''),
                         item.get('url', ''),
                         item.get('snippet', ''),
@@ -166,23 +163,28 @@ def research(candidate, max_sources=6):
             break
 
         url = src['url']
-        publisher = src.get('feed') or domain(url)
+        publisher = clean(src.get('feed', ''))
 
-        # First try the actual article.
         text, title = fetch_article(url)
 
-        if text:
-            publisher_domain = domain(url)
+        # Use the publisher supplied by Google News/GDELT as the
+        # identity of the source. Do NOT use news.google.com as
+        # the publisher identity.
+        publisher_key = publisher.lower()
 
-            if publisher_domain in seen_publishers:
+        if not publisher_key:
+            publisher_key = domain(url)
+
+        if text:
+            if publisher_key in seen_publishers:
                 continue
 
-            seen_publishers.add(publisher_domain)
+            seen_publishers.add(publisher_key)
 
             packet.append({
                 'title': title or src['title'],
                 'url': url,
-                'publisher': publisher,
+                'publisher': publisher or domain(url) or 'Source',
                 'retrieved_at': datetime.now(
                     timezone.utc
                 ).isoformat(),
@@ -191,22 +193,18 @@ def research(candidate, max_sources=6):
 
             continue
 
-        # If the article cannot be fetched, use the RSS/GDELT
-        # description when it contains enough information.
         fallback = clean(src.get('description', ''))
 
         if len(fallback) >= 250:
-            publisher_domain = domain(url)
-
-            if publisher_domain in seen_publishers:
+            if publisher_key in seen_publishers:
                 continue
 
-            seen_publishers.add(publisher_domain)
+            seen_publishers.add(publisher_key)
 
             packet.append({
                 'title': src['title'],
                 'url': url,
-                'publisher': publisher,
+                'publisher': publisher or domain(url) or 'News source',
                 'retrieved_at': datetime.now(
                     timezone.utc
                 ).isoformat(),
