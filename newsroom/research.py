@@ -1,8 +1,10 @@
 import json
 import re
 import urllib.parse
+import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+
 from .http import request, extract_text
 
 
@@ -10,26 +12,17 @@ def _clean(value):
     return ' '.join((value or '').split())
 
 
-def _publisher_from_url(url):
+def _domain(url):
     try:
         return urllib.parse.urlparse(url).netloc.lower().replace('www.', '')
     except Exception:
         return ''
 
 
-def _add_source(sources, seen_urls, title, url, description='', published='', feed=''):
-    if not url:
-        return
+def _add_source(sources, seen_urls, title, url, description='', published='', publisher=''):
+    url = _clean(url)
 
-    url = url.strip()
-
-    if url in seen_urls:
-        return
-
-    domain = _publisher_from_url(url)
-
-    # Avoid adding multiple copies from the same publisher when possible.
-    if domain and any(_publisher_from_url(x['url']) == domain for x in sources):
+    if not url or url in seen_urls:
         return
 
     seen_urls.add(url)
@@ -40,8 +33,41 @@ def _add_source(sources, seen_urls, title, url, description='', published='', fe
         'description': _clean(description),
         'published': published or '',
         'track': 'news',
-        'feed': _clean(feed) or domain or 'News source'
+        'feed': _clean(publisher) or _domain(url) or 'News source'
     })
+
+
+def _resolve_url(url):
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (compatible; LouieCorp-Newsroom/1.0)',
+                'Accept': 'text/html,application/xhtml+xml,*/*'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=20) as response:
+            return response.geturl()
+
+    except Exception:
+        return url
+
+
+def _usable_text(html):
+    try:
+        text, title = extract_text(
+            html.decode('utf-8', 'replace')
+        )
+        text = _clean(text)
+
+        if len(text) >= 500:
+            return text, title
+
+    except Exception:
+        pass
+
+    return '', ''
 
 
 def research(candidate, max_sources=6):
@@ -49,7 +75,6 @@ def research(candidate, max_sources=6):
     seen_urls = set()
 
     candidate_url = candidate.get('url', '')
-    candidate_domain = _publisher_from_url(candidate_url)
 
     if candidate_url:
         _add_source(
@@ -59,12 +84,12 @@ def research(candidate, max_sources=6):
             candidate_url,
             candidate.get('description', ''),
             candidate.get('published', ''),
-            candidate.get('feed', '') or candidate_domain
+            candidate.get('feed', '')
         )
 
     query = urllib.parse.quote(candidate.get('title', ''))
 
-    # Google News RSS discovery.
+    # Google News RSS
     feed_url = (
         'https://news.google.com/rss/search?q='
         + query
@@ -80,21 +105,22 @@ def research(candidate, max_sources=6):
             for item in root.findall('.//item'):
                 title = _clean(item.findtext('title'))
                 url = _clean(item.findtext('link'))
-                desc = _clean(
+                description = _clean(
                     re.sub(
                         '<[^>]+>',
                         ' ',
                         item.findtext('description') or ''
                     )
                 )
+                published = _clean(item.findtext('pubDate'))
 
                 source_node = item.find(
                     '{http://search.yahoo.com/mrss/}source'
                 )
 
                 publisher = (
-                    source_node.text.strip()
-                    if source_node is not None and source_node.text
+                    _clean(source_node.text)
+                    if source_node is not None
                     else ''
                 )
 
@@ -103,8 +129,8 @@ def research(candidate, max_sources=6):
                     seen_urls,
                     title,
                     url,
-                    desc,
-                    item.findtext('pubDate') or '',
+                    description,
+                    published,
                     publisher
                 )
 
@@ -114,7 +140,7 @@ def research(candidate, max_sources=6):
     except Exception as exc:
         print(f'Google News discovery warning: {exc}')
 
-    # GDELT provides another independent discovery path.
+    # GDELT
     if len(sources) < max_sources:
         try:
             gd = (
@@ -150,50 +176,81 @@ def research(candidate, max_sources=6):
     packet = []
     seen_domains = set()
 
-    # Fetch article pages and keep only genuinely usable sources.
     for src in sources:
         if len(packet) >= max_sources:
             break
 
-        try:
-            status, headers, body = request(
-                src['url'],
-                timeout=20
-            )
+        original_url = src['url']
+        resolved_url = _resolve_url(original_url)
 
-            if status >= 400:
-                continue
+        candidates = [resolved_url]
 
-            text, title = extract_text(
-                body.decode('utf-8', 'replace')
-            )
+        if resolved_url != original_url:
+            candidates.append(original_url)
 
-            text = _clean(text)
+        article_text = ''
+        article_title = ''
 
-            if len(text) < 500:
-                continue
+        for url in candidates:
+            try:
+                status, _, body = request(
+                    url,
+                    timeout=20
+                )
 
-            domain = _publisher_from_url(src['url'])
+                if status >= 400:
+                    continue
 
+                article_text, article_title = _usable_text(body)
+
+                if article_text:
+                    break
+
+            except Exception as exc:
+                print(
+                    f'Source fetch warning for {url}: {exc}'
+                )
+
+        domain = _domain(resolved_url)
+
+        # Prefer genuinely extracted publisher text.
+        if article_text:
             if domain in seen_domains:
                 continue
 
             seen_domains.add(domain)
 
             packet.append({
-                'title': title or src['title'],
-                'url': src['url'],
+                'title': article_title or src['title'],
+                'url': resolved_url,
                 'publisher': src.get('feed') or domain or 'Source',
                 'retrieved_at': datetime.now(
                     timezone.utc
                 ).isoformat(),
-                'text': text[:9000]
+                'text': article_text[:9000]
             })
 
-        except Exception as exc:
-            print(
-                f'Source fetch warning for {src.get("url", "")}: {exc}'
-            )
             continue
+
+        # Some publishers block automated article retrieval.
+        # A substantial RSS description can still provide a
+        # second independent source for the research packet.
+        fallback = _clean(src.get('description', ''))
+
+        if len(fallback) >= 300:
+            if domain in seen_domains:
+                continue
+
+            seen_domains.add(domain)
+
+            packet.append({
+                'title': src['title'],
+                'url': resolved_url,
+                'publisher': src.get('feed') or domain or 'News source',
+                'retrieved_at': datetime.now(
+                    timezone.utc
+                ).isoformat(),
+                'text': fallback[:9000]
+            })
 
     return packet
