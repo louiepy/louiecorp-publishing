@@ -18,31 +18,79 @@ def domain(url):
         return ''
 
 
-def add_source(sources, seen, title, url, description='', published='', publisher=''):
+def publisher_name(value, url=''):
+    value = clean(value)
+    d = domain(url)
+
+    invalid = {
+        'google news',
+        'google news uganda',
+        'google news africa',
+        'google news world',
+        'google news science',
+        'news source',
+        'news.google.com',
+        'google.com',
+    }
+
+    if value and value.lower() not in invalid:
+        return value
+
+    if d and d not in {'news.google.com', 'google.com'} and not d.endswith('.google.com'):
+        return d
+
+    return ''
+
+
+def add_source(
+    sources,
+    seen_urls,
+    title,
+    url,
+    description='',
+    published='',
+    publisher=''
+):
     title = clean(title)
     url = clean(url)
     description = clean(description)
-    publisher = clean(publisher)
+    publisher = publisher_name(publisher, url)
 
-    if not url or url in seen:
+    if not url or url in seen_urls:
         return
 
-    seen.add(url)
+    seen_urls.add(url)
 
     sources.append({
         'title': title or 'Related report',
         'url': url,
         'description': description,
         'published': clean(published),
-        'publisher': publisher or domain(url) or 'News source'
+        'publisher': publisher,
     })
 
 
 def fetch_article(url):
+    """
+    Try to retrieve readable article text from a publisher URL.
+
+    Google News and other intermediary pages may not expose a useful
+    article body. Those failures are intentionally treated as a normal
+    research fallback condition rather than a fatal newsroom error.
+    """
     try:
-        status, _, body = request(url, timeout=20)
+        status, headers, body = request(url, timeout=20)
 
         if status >= 400:
+            return '', ''
+
+        content_type = ''
+        try:
+            content_type = str(headers.get('Content-Type', '')).lower()
+        except Exception:
+            pass
+
+        if content_type and 'html' not in content_type:
             return '', ''
 
         text, title = extract_text(
@@ -62,22 +110,31 @@ def fetch_article(url):
 
 def research(candidate, max_sources=6):
     sources = []
-    seen = set()
+    seen_urls = set()
 
-    # Candidate itself.
+    # Candidate URLs are useful evidence, but the discovery feed name
+    # must never be treated as the publisher.
     add_source(
         sources,
-        seen,
+        seen_urls,
         candidate.get('title', ''),
         candidate.get('url', ''),
         candidate.get('description', ''),
         candidate.get('published', ''),
-        candidate.get('feed', '')
+        ''
     )
 
-    query = urllib.parse.quote(candidate.get('title', ''))
+    title_query = clean(candidate.get('title', ''))
 
-    # Pull related coverage from Google News RSS.
+    if not title_query:
+        print('Research warning: candidate has no title.')
+        return []
+
+    query = urllib.parse.quote(title_query)
+
+    # ------------------------------------------------------------
+    # Google News RSS
+    # ------------------------------------------------------------
     google_url = (
         'https://news.google.com/rss/search?q='
         + query
@@ -85,10 +142,7 @@ def research(candidate, max_sources=6):
     )
 
     try:
-        status, _, body = request(
-            google_url,
-            timeout=20
-        )
+        status, _, body = request(google_url, timeout=20)
 
         if status < 400:
             root = ET.fromstring(body)
@@ -107,6 +161,7 @@ def research(candidate, max_sources=6):
 
                 publisher = ''
 
+                # RSS source metadata.
                 source_node = item.find(
                     '{http://search.yahoo.com/mrss/}source'
                 )
@@ -116,19 +171,24 @@ def research(candidate, max_sources=6):
 
                 if not publisher:
                     source_node = item.find('source')
+
                     if source_node is not None:
                         publisher = clean(source_node.text)
 
-                # Google News sometimes embeds the publisher
-                # in the title as "Headline - Publisher".
-                if not publisher and ' - ' in title:
+                # Google News commonly formats headlines as:
+                #
+                # Headline - Publisher
+                #
+                # Always prefer this publisher when available.
+                if ' - ' in title:
                     possible = title.rsplit(' - ', 1)[-1].strip()
+
                     if 1 < len(possible) < 100:
                         publisher = possible
 
                 add_source(
                     sources,
-                    seen,
+                    seen_urls,
                     title,
                     url,
                     description,
@@ -136,22 +196,31 @@ def research(candidate, max_sources=6):
                     publisher
                 )
 
-    except Exception:
-        pass
+    except ET.ParseError as error:
+        print(
+            'Research warning: Google News returned invalid RSS:',
+            error
+        )
+    except Exception as error:
+        print(
+            'Research warning: Google News:',
+            type(error).__name__,
+            error
+        )
 
-    # Try GDELT only as an additional source pool.
+    # ------------------------------------------------------------
+    # GDELT fallback
+    # ------------------------------------------------------------
     if len(sources) < max_sources:
         try:
             gdelt_url = (
                 'https://api.gdeltproject.org/api/v2/doc/doc?query='
                 + query
-                + '&mode=ArtList&maxrecords=20&format=json&sort=HybridRel'
+                + '&mode=ArtList&maxrecords=30'
+                + '&format=json&sort=HybridRel'
             )
 
-            status, _, body = request(
-                gdelt_url,
-                timeout=20
-            )
+            status, _, body = request(gdelt_url, timeout=20)
 
             if status < 400:
                 import json
@@ -163,7 +232,7 @@ def research(candidate, max_sources=6):
                 for item in data.get('articles', []):
                     add_source(
                         sources,
-                        seen,
+                        seen_urls,
                         item.get('title', ''),
                         item.get('url', ''),
                         item.get('snippet', ''),
@@ -174,79 +243,115 @@ def research(candidate, max_sources=6):
                     if len(sources) >= max_sources:
                         break
 
-        except Exception:
-            pass
+        except Exception as error:
+            print(
+                'Research warning: GDELT:',
+                type(error).__name__,
+                error
+            )
 
+    # ------------------------------------------------------------
+    # Build usable evidence packet
+    # ------------------------------------------------------------
     packet = []
     seen_publishers = set()
 
-    # First use full publisher articles whenever possible.
+    # First priority: full article text from independent publishers.
     for src in sources:
         if len(packet) >= max_sources:
             break
 
-        publisher = clean(src.get('publisher', ''))
-        publisher_key = publisher.lower()
+        publisher = publisher_name(
+            src.get('publisher', ''),
+            src.get('url', '')
+        )
 
-        if not publisher_key:
-            publisher_key = domain(src['url'])
+        if not publisher:
+            continue
+
+        publisher_key = publisher.lower()
 
         if publisher_key in seen_publishers:
             continue
 
-        text, title = fetch_article(src['url'])
+        text, article_title = fetch_article(
+            src.get('url', '')
+        )
 
-        if text:
-            seen_publishers.add(publisher_key)
-
-            packet.append({
-                'title': title or src['title'],
-                'url': src['url'],
-                'publisher': publisher or domain(src['url']) or 'News source',
-                'retrieved_at': datetime.now(
-                    timezone.utc
-                ).isoformat(),
-                'text': text[:9000]
-            })
-
-    # Then use independent RSS/GDELT reports when direct article
-    # retrieval is blocked. Require meaningful snippets.
-    for src in sources:
-        if len(packet) >= max_sources:
-            break
-
-        fallback = clean(src.get('description', ''))
-
-        if len(fallback) < 120:
-            continue
-
-        publisher = clean(src.get('publisher', ''))
-        publisher_key = publisher.lower()
-
-        if not publisher_key:
-            publisher_key = domain(src['url'])
-
-        if not publisher_key or publisher_key in seen_publishers:
+        if not text:
             continue
 
         seen_publishers.add(publisher_key)
 
         packet.append({
-            'title': src['title'],
-            'url': src['url'],
+            'title': article_title or src.get('title', ''),
+            'url': src.get('url', ''),
             'publisher': publisher,
             'retrieved_at': datetime.now(
                 timezone.utc
             ).isoformat(),
-            'text': fallback[:9000]
+            'text': text[:9000],
         })
 
-    print(f'Research produced {len(packet)} usable sources.')
+    # Second priority: meaningful RSS/GDELT descriptions.
+    #
+    # This is important because many legitimate publishers block
+    # automated article retrieval while their RSS metadata remains
+    # available.
+    for src in sources:
+        if len(packet) >= max_sources:
+            break
+
+        fallback = clean(
+            src.get('description', '')
+        )
+
+        if len(fallback) < 120:
+            continue
+
+        publisher = publisher_name(
+            src.get('publisher', ''),
+            src.get('url', '')
+        )
+
+        if not publisher:
+            continue
+
+        publisher_key = publisher.lower()
+
+        if publisher_key in seen_publishers:
+            continue
+
+        seen_publishers.add(publisher_key)
+
+        packet.append({
+            'title': src.get('title', ''),
+            'url': src.get('url', ''),
+            'publisher': publisher,
+            'retrieved_at': datetime.now(
+                timezone.utc
+            ).isoformat(),
+            'text': fallback[:9000],
+        })
+
+    # ------------------------------------------------------------
+    # Research logging
+    # ------------------------------------------------------------
+    print(
+        f'Research produced {len(packet)} usable sources.'
+    )
 
     for source in packet:
         print(
-            f'Research source: {source["publisher"]} '
-            f'({len(source["text"])} chars)'
+            'Research source:',
+            source['publisher'],
+            f"({len(source['text'])} chars)"
+        )
+
+    if len(packet) < 2:
+        print(
+            'Research warning: fewer than two independent '
+            'publishers were found for this candidate.'
         )
 
     return packet
