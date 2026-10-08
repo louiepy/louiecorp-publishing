@@ -1,5 +1,6 @@
 import os
 import unittest
+import urllib.parse
 from unittest.mock import patch
 
 os.environ.setdefault(
@@ -51,13 +52,16 @@ class ResearchTests(unittest.TestCase):
         </rss>'''
 
         def fake_request(url, **kwargs):
+            host = urllib.parse.urlparse(
+                url
+            ).netloc.lower()
             if 'news.google.com/rss/search' in url:
                 return 200, {}, rss.encode('utf-8')
-            if 'monitor.co.ug' in url:
+            if host.endswith('monitor.co.ug'):
                 return 200, {'Content-Type': 'text/html'}, long_html('Monitor reporting')
-            if 'reuters.com' in url:
+            if host.endswith('reuters.com'):
                 return 200, {'Content-Type': 'text/html'}, long_html('Reuters reporting')
-            if 'gdeltproject' in url:
+            if host.endswith('gdeltproject.org'):
                 return 200, {}, b'{"articles":[]}'
             return 404, {}, b''
 
@@ -127,11 +131,17 @@ class ResearchTests(unittest.TestCase):
         </rss>'''
 
         def fake_request(url, **kwargs):
+            host = urllib.parse.urlparse(
+                url
+            ).netloc.lower()
             if 'news.google.com/rss/search' in url:
                 return 200, {}, rss.encode('utf-8')
-            if 'newvision.co.ug' in url or 'theeastafrican.co.ke' in url:
+            if (
+                host.endswith('newvision.co.ug')
+                or host.endswith('theeastafrican.co.ke')
+            ):
                 return 403, {'Content-Type': 'text/html'}, b''
-            if 'gdeltproject' in url:
+            if host.endswith('gdeltproject.org'):
                 return 200, {}, b'{"articles":[]}'
             return 404, {}, b''
 
