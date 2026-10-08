@@ -56,7 +56,12 @@ def extract_publisher(item_title, source_text, url, fallback=''):
     except Exception:
         pass
 
-    return clean(fallback)
+    fallback = clean(fallback)
+
+    if fallback and fallback.lower() not in invalid:
+        return fallback
+
+    return ''
 
 
 def discover():
@@ -106,10 +111,14 @@ def discover():
                 )
 
                 source = ''
+                source_url = ''
 
                 if source_node is not None:
                     source = clean(
                         source_node.text
+                    )
+                    source_url = clean(
+                        source_node.attrib.get('url', '')
                     )
 
                 if not source:
@@ -118,6 +127,9 @@ def discover():
                     if source_node is not None:
                         source = clean(
                             source_node.text
+                        )
+                        source_url = clean(
+                            source_node.attrib.get('url', '')
                         )
 
                 publisher = extract_publisher(
@@ -138,6 +150,7 @@ def discover():
                     'track': track,
                     'feed': publisher,
                     'publisher': publisher,
+                    'publisher_url': source_url,
                 })
 
         except ET.ParseError as error:
