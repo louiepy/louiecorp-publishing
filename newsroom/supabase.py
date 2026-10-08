@@ -1,7 +1,7 @@
 import datetime as dt
 import urllib.parse
 from .config import SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
-from .http import get_json, request
+from .http import body_text, get_json, request
 
 HEADERS = {
     'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -14,10 +14,14 @@ HEADERS = {
 def rest(table, query='', method='GET', data=None, headers=None):
     url = f'{SUPABASE_URL}/rest/v1/{table}' + (f'?{query}' if query else '')
     h = dict(HEADERS); h.update(headers or {})
-    status, _, body = request(url, method=method, data=data, headers=h)
+    status, headers, body = request(url, method=method, data=data, headers=h)
     if status >= 400:
-        raise RuntimeError(f'Supabase {status}: {body.decode("utf-8", "replace")[:1000]}')
-    return [] if not body else __import__('json').loads(body.decode('utf-8', 'replace'))
+        raise RuntimeError(
+            f'Supabase {status}: {body_text(body, headers, 1000)}'
+        )
+    return [] if not body else __import__('json').loads(
+        body_text(body, headers)
+    )
 
 
 def today_window():

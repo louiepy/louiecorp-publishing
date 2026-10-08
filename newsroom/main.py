@@ -834,18 +834,28 @@ def main(mode='auto'):
     except Exception as error:
         from .supabase import rest
 
-        rest(
-            'newsroom_runs',
-            f'id=eq.{run["id"]}',
-            method='PATCH',
-            data={
-                'success': False,
-                'error_message': str(error)[:1000],
-                'finished_at': dt.datetime.now(
-                    dt.timezone.utc
-                ).isoformat(),
-            },
-        )
+        try:
+            rest(
+                'newsroom_runs',
+                f'id=eq.{run["id"]}',
+                method='PATCH',
+                data={
+                    'success': False,
+                    'error_message': str(error)[:1000],
+                    'finished_at': dt.datetime.now(
+                        dt.timezone.utc
+                    ).isoformat(),
+                },
+            )
+        except Exception as log_error:
+            print(
+                'NEWSROOM RUN LOGGING FAILED:',
+                log_error,
+            )
+            print(
+                'Original newsroom error was:',
+                error,
+            )
 
         print(
             'NEWSROOM ERROR:',

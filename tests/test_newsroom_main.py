@@ -143,6 +143,72 @@ class MainFlowTests(unittest.TestCase):
         logged_sources = log_sources_mock.call_args[0][0]
         self.assertEqual(2, len(logged_sources))
 
+    def test_preserves_original_error_if_run_logging_fails(self):
+        run = {'id': 'run-1'}
+        candidates = [{
+            'title': 'Candidate one',
+            'url': 'https://example.com/one',
+            'description': 'desc',
+            'track': 'news',
+        }]
+        sources_good = [
+            {
+                'title': 'One',
+                'url': 'https://pub1.example/article',
+                'publisher': 'pub1.example',
+                'retrieved_at': '2026-01-01T00:00:00+00:00',
+                'text': 'x' * 300,
+            },
+            {
+                'title': 'Two',
+                'url': 'https://pub2.example/article',
+                'publisher': 'pub2.example',
+                'retrieved_at': '2026-01-01T00:01:00+00:00',
+                'text': 'y' * 300,
+            },
+        ]
+
+        with patch(
+            'newsroom.main.automated_today',
+            return_value=[],
+        ), patch(
+            'newsroom.main.uganda_done_today',
+            return_value=True,
+        ), patch(
+            'newsroom.main.candidate_is_eligible',
+            side_effect=lambda candidate, *_args, **_kwargs: (
+                candidate.setdefault(
+                    'importance_score',
+                    80,
+                )
+                or True
+            ),
+        ), patch(
+            'newsroom.main.discover',
+            return_value=candidates,
+        ), patch(
+            'newsroom.main.find_duplicate',
+            return_value=None,
+        ), patch(
+            'newsroom.main.research',
+            return_value=sources_good,
+        ), patch(
+            'newsroom.main.generate',
+            side_effect=RuntimeError('Gemini 404: models/gemini-2.5-flash is not found'),
+        ), patch(
+            'newsroom.main.log_run',
+            return_value=run,
+        ), patch(
+            'newsroom.main.log_candidate',
+            return_value={'id': 'candidate-1'},
+        ), patch(
+            'newsroom.supabase.rest',
+            side_effect=RuntimeError('Supabase 400: gzip body'),
+        ):
+            code = newsroom_main.main('news')
+
+        self.assertEqual(1, code)
+
 
 if __name__ == '__main__':
     unittest.main()
