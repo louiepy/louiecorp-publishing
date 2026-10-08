@@ -1,0 +1,22 @@
+User-agent: *
+Allow: /
+Allow: /article.html
+Allow: /author.html
+Allow: /section.html
+Allow: /search.html
+Allow: /sitemap.html
+Allow: /sitemap.xml
+Allow: /rss.xml
+Allow: /about.html
+Allow: /s/
+Allow: /story/
+Allow: /css/
+Allow: /js/
+Allow: /fonts/
+Disallow: /admin/
+Disallow: /admin
+Disallow: /200.html
+Disallow: /404.html
+
+Sitemap: https://louiecorp.com/sitemap.xml
+Sitemap: https://louiecorp.com/sitemap.html

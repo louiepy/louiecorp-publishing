@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>LouieCorp</title>
+  <script>
+    (function () {
+      var path = location.pathname.replace(/\/+$/, '');
+      if (path.indexOf('/s/') === 0 || /^\/[a-z0-9][a-z0-9-]*$/i.test(path)) {
+        var slug = decodeURIComponent(path.split('/').filter(Boolean).pop() || '');
+        location.replace('/article.html?slug=' + encodeURIComponent(slug));
+        return;
+      }
+      location.replace('/index.html');
+    }());
+  </script>
+</head>
+<body></body>
+</html>
