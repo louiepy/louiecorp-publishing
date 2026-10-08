@@ -30,6 +30,10 @@ from .supabase import (
 )
 
 
+class CandidatePoolExhaustedError(RuntimeError):
+    pass
+
+
 def clean_html(value):
     import re as _re
 
@@ -430,7 +434,7 @@ def main(mode='auto'):
             )
 
             if not candidates:
-                raise RuntimeError(
+                raise CandidatePoolExhaustedError(
                     'No Uganda candidate was found '
                     'for the required daily Uganda story.'
                 )
@@ -544,14 +548,14 @@ def main(mode='auto'):
 
         if selected is None or sources is None:
             if uganda_needed:
-                raise RuntimeError(
+                raise CandidatePoolExhaustedError(
                     'No sufficiently important, '
                     'non-duplicate Uganda candidate '
                     'with at least two independent '
                     'usable sources was found.'
                 )
 
-            raise RuntimeError(
+            raise CandidatePoolExhaustedError(
                 'No suitable candidate with at least '
                 'two independent usable sources was found.'
             )
@@ -847,6 +851,16 @@ def main(mode='auto'):
             'NEWSROOM ERROR:',
             error,
         )
+
+        if isinstance(
+            error,
+            CandidatePoolExhaustedError,
+        ):
+            print(
+                'NEWSROOM SKIP: no qualifying '
+                'candidate was available for this slot.'
+            )
+            return 0
 
         traceback.print_exc()
 

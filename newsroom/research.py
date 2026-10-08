@@ -1,10 +1,26 @@
+import html
+import json
 import re
 import urllib.parse
+import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-from .config import RSS_FEEDS
-from .http import request, extract_text
+from .config import USER_AGENT
+from .http import extract_text, request
+
+INVALID_PUBLISHERS = {
+    'google news',
+    'google news uganda',
+    'google news africa',
+    'google news world',
+    'google news science',
+    'news source',
+    'news.google.com',
+    'google.com',
+}
+
+MIN_FALLBACK_TEXT = 140
 
 
 def clean(value):
@@ -13,33 +29,245 @@ def clean(value):
 
 def domain(url):
     try:
-        return urllib.parse.urlparse(url).netloc.lower().replace('www.', '')
+        host = urllib.parse.urlparse(
+            clean(url)
+        ).netloc.lower().strip()
+        if host.startswith('www.'):
+            host = host[4:]
+        return host
     except Exception:
         return ''
 
 
-def publisher_name(value, url=''):
-    value = clean(value)
-    d = domain(url)
+def is_google_domain(host):
+    host = clean(host).lower()
+    return (
+        host == 'google.com'
+        or host.endswith('.google.com')
+        or host.endswith('.googleusercontent.com')
+    )
 
-    invalid = {
-        'google news',
-        'google news uganda',
-        'google news africa',
-        'google news world',
-        'google news science',
-        'news source',
-        'news.google.com',
-        'google.com',
-    }
 
-    if value and value.lower() not in invalid:
-        return value
+def normalize_publisher_text(value):
+    text = clean(value).lower()
+    text = re.sub(r'[^a-z0-9]+', ' ', text)
+    text = clean(text)
 
-    if d and d not in {'news.google.com', 'google.com'} and not d.endswith('.google.com'):
-        return d
+    if not text or text in INVALID_PUBLISHERS:
+        return ''
+
+    return text
+
+
+def publisher_name(value, url='', source_url=''):
+    label = clean(value)
+
+    if normalize_publisher_text(label):
+        return label
+
+    for candidate in [source_url, url]:
+        host = domain(candidate)
+
+        if host and not is_google_domain(host):
+            return host
 
     return ''
+
+
+def publisher_key(publisher, url='', source_url=''):
+    for candidate in [source_url, url]:
+        host = domain(candidate)
+
+        if host and not is_google_domain(host):
+            return host
+
+    normalized = normalize_publisher_text(
+        publisher
+    )
+
+    if normalized:
+        return f'name:{normalized}'
+
+    return ''
+
+
+def remove_tags(value):
+    return clean(
+        html.unescape(
+            re.sub(
+                r'<[^>]+>',
+                ' ',
+                str(value or ''),
+            )
+        )
+    )
+
+
+def normalize_url(url):
+    value = clean(url)
+
+    if not value:
+        return ''
+
+    try:
+        parsed = urllib.parse.urlparse(value)
+
+        if parsed.scheme not in {'http', 'https'}:
+            return ''
+
+        return urllib.parse.urlunparse(
+            parsed._replace(fragment='')
+        )
+    except Exception:
+        return ''
+
+
+def decode_google_query_url(url):
+    value = normalize_url(url)
+
+    if not value:
+        return ''
+
+    parsed = urllib.parse.urlparse(value)
+
+    for key in ('url', 'u', 'q'):
+        options = urllib.parse.parse_qs(
+            parsed.query
+        ).get(key)
+
+        if not options:
+            continue
+
+        candidate = normalize_url(options[0])
+
+        if candidate and not is_google_domain(
+            domain(candidate)
+        ):
+            return candidate
+
+    return ''
+
+
+def extract_links(value):
+    links = []
+
+    for match in re.findall(
+        r'href=["\']([^"\']+)["\']',
+        str(value or ''),
+        flags=re.I,
+    ):
+        candidate = normalize_url(
+            html.unescape(match)
+        )
+
+        if not candidate:
+            continue
+
+        if candidate in links:
+            continue
+
+        links.append(candidate)
+
+    return links
+
+
+def follow_redirect(url):
+    value = normalize_url(url)
+
+    if not value:
+        return ''
+
+    try:
+        req = urllib.request.Request(
+            value,
+            headers={
+                'User-Agent': USER_AGENT,
+                'Accept': (
+                    'text/html,application/xhtml+xml,'
+                    'application/xml;q=0.9,*/*;q=0.8'
+                ),
+            },
+        )
+
+        with urllib.request.urlopen(
+            req,
+            timeout=20,
+        ) as response:
+            final = normalize_url(
+                response.geturl()
+            )
+
+            if final:
+                return final
+
+    except Exception:
+        pass
+
+    return ''
+
+
+def resolve_source_url(source):
+    url = normalize_url(
+        source.get('url', '')
+    )
+
+    source_url = normalize_url(
+        source.get('source_url', '')
+    )
+
+    related = [
+        normalize_url(item)
+        for item in source.get(
+            'related_urls',
+            [],
+        )
+    ]
+
+    candidates = []
+
+    decoded = decode_google_query_url(url)
+
+    if decoded:
+        candidates.append(decoded)
+
+    candidates.extend(
+        item
+        for item in related
+        if item
+    )
+
+    if source_url:
+        candidates.append(source_url)
+
+    if url:
+        candidates.append(url)
+
+    # Always keep deterministic order while deduplicating.
+    ordered = []
+    seen = set()
+
+    for item in candidates:
+        if not item or item in seen:
+            continue
+
+        seen.add(item)
+        ordered.append(item)
+
+    for item in ordered:
+        if not is_google_domain(
+            domain(item)
+        ):
+            return item
+
+    if url and is_google_domain(domain(url)):
+        redirected = follow_redirect(url)
+
+        if redirected and not is_google_domain(
+            domain(redirected)
+        ):
+            return redirected
+
+    return ordered[0] if ordered else ''
 
 
 def add_source(
@@ -49,44 +277,68 @@ def add_source(
     url,
     description='',
     published='',
-    publisher=''
+    publisher='',
+    source_url='',
+    related_urls=None,
 ):
     title = clean(title)
-    url = clean(url)
+    url = normalize_url(url)
+    source_url = normalize_url(source_url)
     description = clean(description)
-    publisher = publisher_name(publisher, url)
 
-    if not url or url in seen_urls:
+    if not url and not source_url:
         return
 
-    seen_urls.add(url)
+    dedupe_url = source_url or url
+
+    if dedupe_url in seen_urls:
+        return
+
+    seen_urls.add(dedupe_url)
+
+    links = []
+
+    for item in related_urls or []:
+        normalized = normalize_url(item)
+
+        if normalized and normalized not in links:
+            links.append(normalized)
 
     sources.append({
         'title': title or 'Related report',
         'url': url,
         'description': description,
         'published': clean(published),
-        'publisher': publisher,
+        'publisher': clean(publisher),
+        'source_url': source_url,
+        'related_urls': links,
     })
 
 
 def fetch_article(url):
-    """
-    Try to retrieve readable article text from a publisher URL.
+    target = normalize_url(url)
 
-    Google News and other intermediary pages may not expose a useful
-    article body. Those failures are intentionally treated as a normal
-    research fallback condition rather than a fatal newsroom error.
-    """
+    if not target:
+        return '', ''
+
+    if is_google_domain(domain(target)):
+        return '', ''
+
     try:
-        status, headers, body = request(url, timeout=20)
+        status, headers, body = request(
+            target,
+            timeout=20,
+        )
 
         if status >= 400:
             return '', ''
 
         content_type = ''
+
         try:
-            content_type = str(headers.get('Content-Type', '')).lower()
+            content_type = str(
+                headers.get('Content-Type', '')
+            ).lower()
         except Exception:
             pass
 
@@ -108,12 +360,92 @@ def fetch_article(url):
     return '', ''
 
 
+def fallback_text(source):
+    text = remove_tags(
+        source.get('description', '')
+    )
+
+    text = re.sub(
+        r'view full coverage on google news\b',
+        ' ',
+        text,
+        flags=re.I,
+    )
+
+    text = re.sub(
+        r'\bgoogle news\b',
+        ' ',
+        text,
+        flags=re.I,
+    )
+
+    text = clean(text)
+
+    if len(text) < MIN_FALLBACK_TEXT:
+        return ''
+
+    words = re.findall(
+        r'[a-z0-9]{3,}',
+        text.lower(),
+    )
+
+    if len(set(words)) < 18:
+        return ''
+
+    return text
+
+
+def source_from_google_item(item):
+    title = clean(
+        item.findtext('title')
+    )
+
+    url = clean(item.findtext('link'))
+    description_html = item.findtext('description') or ''
+    description = remove_tags(description_html)
+    related_urls = extract_links(description_html)
+    publisher = ''
+    source_url = ''
+
+    source_node = item.find(
+        '{http://search.yahoo.com/mrss/}source'
+    )
+
+    if source_node is None:
+        source_node = item.find('source')
+
+    if source_node is not None:
+        publisher = clean(source_node.text)
+        source_url = clean(
+            source_node.attrib.get('url', '')
+        )
+
+    if ' - ' in title:
+        possible = title.rsplit(
+            ' - ',
+            1,
+        )[-1].strip()
+
+        if 1 < len(possible) < 100:
+            publisher = possible
+
+    return {
+        'title': title,
+        'url': url,
+        'description': description,
+        'published': clean(
+            item.findtext('pubDate') or ''
+        ),
+        'publisher': publisher,
+        'source_url': source_url,
+        'related_urls': related_urls,
+    }
+
+
 def research(candidate, max_sources=6):
     sources = []
     seen_urls = set()
 
-    # Candidate URLs are useful evidence, but the discovery feed name
-    # must never be treated as the publisher.
     add_source(
         sources,
         seen_urls,
@@ -121,20 +453,22 @@ def research(candidate, max_sources=6):
         candidate.get('url', ''),
         candidate.get('description', ''),
         candidate.get('published', ''),
-        ''
+        candidate.get('publisher', ''),
+        candidate.get('publisher_url', ''),
     )
 
-    title_query = clean(candidate.get('title', ''))
+    title_query = clean(
+        candidate.get('title', '')
+    )
 
     if not title_query:
-        print('Research warning: candidate has no title.')
+        print(
+            'Research warning: candidate has no title.'
+        )
         return []
 
     query = urllib.parse.quote(title_query)
 
-    # ------------------------------------------------------------
-    # Google News RSS
-    # ------------------------------------------------------------
     google_url = (
         'https://news.google.com/rss/search?q='
         + query
@@ -142,75 +476,44 @@ def research(candidate, max_sources=6):
     )
 
     try:
-        status, _, body = request(google_url, timeout=20)
+        status, _, body = request(
+            google_url,
+            timeout=20,
+        )
 
         if status < 400:
             root = ET.fromstring(body)
 
             for item in root.findall('.//item')[:30]:
-                title = clean(item.findtext('title'))
-                url = clean(item.findtext('link'))
-
-                description = clean(
-                    re.sub(
-                        r'<[^>]+>',
-                        ' ',
-                        item.findtext('description') or ''
-                    )
+                source = source_from_google_item(
+                    item
                 )
-
-                publisher = ''
-
-                # RSS source metadata.
-                source_node = item.find(
-                    '{http://search.yahoo.com/mrss/}source'
-                )
-
-                if source_node is not None:
-                    publisher = clean(source_node.text)
-
-                if not publisher:
-                    source_node = item.find('source')
-
-                    if source_node is not None:
-                        publisher = clean(source_node.text)
-
-                # Google News commonly formats headlines as:
-                #
-                # Headline - Publisher
-                #
-                # Always prefer this publisher when available.
-                if ' - ' in title:
-                    possible = title.rsplit(' - ', 1)[-1].strip()
-
-                    if 1 < len(possible) < 100:
-                        publisher = possible
 
                 add_source(
                     sources,
                     seen_urls,
-                    title,
-                    url,
-                    description,
-                    item.findtext('pubDate') or '',
-                    publisher
+                    source['title'],
+                    source['url'],
+                    source['description'],
+                    source['published'],
+                    source['publisher'],
+                    source['source_url'],
+                    source['related_urls'],
                 )
 
     except ET.ParseError as error:
         print(
-            'Research warning: Google News returned invalid RSS:',
-            error
+            'Research warning: Google News '
+            'returned invalid RSS:',
+            error,
         )
     except Exception as error:
         print(
             'Research warning: Google News:',
             type(error).__name__,
-            error
+            error,
         )
 
-    # ------------------------------------------------------------
-    # GDELT fallback
-    # ------------------------------------------------------------
     if len(sources) < max_sources:
         try:
             gdelt_url = (
@@ -220,16 +523,20 @@ def research(candidate, max_sources=6):
                 + '&format=json&sort=HybridRel'
             )
 
-            status, _, body = request(gdelt_url, timeout=20)
+            status, _, body = request(
+                gdelt_url,
+                timeout=20,
+            )
 
             if status < 400:
-                import json
-
                 data = json.loads(
                     body.decode('utf-8', 'replace')
                 )
 
-                for item in data.get('articles', []):
+                for item in data.get(
+                    'articles',
+                    [],
+                ):
                     add_source(
                         sources,
                         seen_urls,
@@ -237,55 +544,74 @@ def research(candidate, max_sources=6):
                         item.get('url', ''),
                         item.get('snippet', ''),
                         item.get('seendate', ''),
-                        item.get('domain', '')
+                        item.get('domain', ''),
+                        item.get('url', ''),
                     )
 
-                    if len(sources) >= max_sources:
+                    if len(sources) >= max_sources * 4:
                         break
 
         except Exception as error:
             print(
                 'Research warning: GDELT:',
                 type(error).__name__,
-                error
+                error,
             )
 
-    # ------------------------------------------------------------
-    # Build usable evidence packet
-    # ------------------------------------------------------------
     packet = []
     seen_publishers = set()
+    seen_texts = set()
 
-    # First priority: full article text from independent publishers.
-    for src in sources:
+    for source in sources:
         if len(packet) >= max_sources:
             break
 
+        resolved_url = resolve_source_url(source)
+
         publisher = publisher_name(
-            src.get('publisher', ''),
-            src.get('url', '')
+            source.get('publisher', ''),
+            resolved_url or source.get('url', ''),
+            source.get('source_url', ''),
         )
 
-        if not publisher:
+        key = publisher_key(
+            publisher,
+            resolved_url or source.get('url', ''),
+            source.get('source_url', ''),
+        )
+
+        if not key:
             continue
 
-        publisher_key = publisher.lower()
-
-        if publisher_key in seen_publishers:
+        if key in seen_publishers:
             continue
 
         text, article_title = fetch_article(
-            src.get('url', '')
+            resolved_url
         )
+
+        if not text:
+            text = fallback_text(source)
 
         if not text:
             continue
 
-        seen_publishers.add(publisher_key)
+        fingerprint = clean(
+            text[:450]
+        ).lower()
+
+        if fingerprint in seen_texts:
+            continue
+
+        seen_texts.add(fingerprint)
+        seen_publishers.add(key)
 
         packet.append({
-            'title': article_title or src.get('title', ''),
-            'url': src.get('url', ''),
+            'title': article_title
+            or source.get('title', ''),
+            'url': resolved_url
+            or source.get('url', '')
+            or source.get('source_url', ''),
             'publisher': publisher,
             'retrieved_at': datetime.now(
                 timezone.utc
@@ -293,50 +619,6 @@ def research(candidate, max_sources=6):
             'text': text[:9000],
         })
 
-    # Second priority: meaningful RSS/GDELT descriptions.
-    #
-    # This is important because many legitimate publishers block
-    # automated article retrieval while their RSS metadata remains
-    # available.
-    for src in sources:
-        if len(packet) >= max_sources:
-            break
-
-        fallback = clean(
-            src.get('description', '')
-        )
-
-        if len(fallback) < 120:
-            continue
-
-        publisher = publisher_name(
-            src.get('publisher', ''),
-            src.get('url', '')
-        )
-
-        if not publisher:
-            continue
-
-        publisher_key = publisher.lower()
-
-        if publisher_key in seen_publishers:
-            continue
-
-        seen_publishers.add(publisher_key)
-
-        packet.append({
-            'title': src.get('title', ''),
-            'url': src.get('url', ''),
-            'publisher': publisher,
-            'retrieved_at': datetime.now(
-                timezone.utc
-            ).isoformat(),
-            'text': fallback[:9000],
-        })
-
-    # ------------------------------------------------------------
-    # Research logging
-    # ------------------------------------------------------------
     print(
         f'Research produced {len(packet)} usable sources.'
     )
@@ -345,13 +627,15 @@ def research(candidate, max_sources=6):
         print(
             'Research source:',
             source['publisher'],
-            f"({len(source['text'])} chars)"
+            source['url'],
+            f"({len(source['text'])} chars)",
         )
 
     if len(packet) < 2:
         print(
-            'Research warning: fewer than two independent '
-            'publishers were found for this candidate.'
+            'Research warning: fewer than two '
+            'independent publishers were found for '
+            'this candidate.'
         )
 
     return packet
