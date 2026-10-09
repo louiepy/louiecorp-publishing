@@ -1,6 +1,29 @@
 const ALLOWED_FOLDERS = new Set(['covers', 'authors', 'pdfs', 'sources']);
 const BOT_MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
-const BOT_IMAGE_HOSTS = new Set(['commons.wikimedia.org', 'upload.wikimedia.org', 'images.unsplash.com']);
+// The newsroom only selects photographs through Wikimedia Commons and Unsplash.
+// Permit their documented image hosts/subdomains, not arbitrary user-supplied hosts.
+const BOT_IMAGE_HOSTS = new Set([
+  'commons.wikimedia.org',
+  'upload.wikimedia.org',
+  'wikimedia.org',
+  'wikipedia.org',
+  'images.unsplash.com',
+  'plus.unsplash.com'
+]);
+
+export function isApprovedBotImageSource(value) {
+  try {
+    const source = new URL(String(value || '').trim());
+    if (source.protocol !== 'https:' || source.username || source.password) return false;
+    const host = source.hostname.toLowerCase();
+    return BOT_IMAGE_HOSTS.has(host) ||
+      host.endsWith('.wikimedia.org') ||
+      host.endsWith('.wikipedia.org') ||
+      host.endsWith('.unsplash.com');
+  } catch (_) {
+    return false;
+  }
+}
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const SITE_ORIGIN = 'https://louiecorp.com';
 const PUBLISHER_NAME = 'LouieCorp Publishing';
@@ -165,11 +188,23 @@ async function handleBotMedia(request, env, pathname) {
   const source = String(request.headers.get('X-Image-Source') || '').trim();
   let sourceUrl;
   try { sourceUrl = new URL(source); } catch (_) { return json({ error: 'Invalid image source.' }, 400); }
-  if (sourceUrl.protocol !== 'https:' || !BOT_IMAGE_HOSTS.has(sourceUrl.hostname.toLowerCase())) {
-    return json({ error: 'Image source is not an approved host.' }, 400);
+  if (!isApprovedBotImageSource(sourceUrl.toString())) {
+    return json({ error: `Image source is not an approved host: ${sourceUrl.hostname || 'unknown'}.` }, 400);
   }
-  const upstream = await fetch(sourceUrl.toString(), { headers: { 'User-Agent': 'LouieCorp-Newsroom/1.0' } });
-  if (!upstream.ok) return json({ error: 'Could not fetch the source image.' }, 502);
+  let upstream;
+  try {
+    upstream = await fetch(sourceUrl.toString(), {
+      headers: { 'User-Agent': 'LouieCorp-Newsroom/1.0 (+https://louiecorp.com/editorial-policy.html)', 'Accept': 'image/avif,image/webp,image/*,*/*;q=0.8' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(20000)
+    });
+  } catch (error) {
+    return json({ error: 'Could not reach the approved image source. The newsroom can retry this run.' }, 502);
+  }
+  if (upstream.url && !isApprovedBotImageSource(upstream.url)) {
+    return json({ error: 'Image source redirected outside the approved photo hosts.' }, 400);
+  }
+  if (!upstream.ok) return json({ error: `Could not fetch the source image (HTTP ${upstream.status}).` }, 502);
   const contentType = String(upstream.headers.get('Content-Type') || '');
   if (!contentType.toLowerCase().startsWith('image/')) return json({ error: 'Source is not an image.' }, 415);
   const length = Number(upstream.headers.get('Content-Length') || 0);
@@ -314,7 +349,7 @@ function storyShareHtml(article) {
 }
 
 function storySlugFromPath(pathname) {
-  const match = String(pathname || '').match(/^\/share\/story\/([^/?#]+)$/);
+  const match = String(pathname || '').match(/^\/(?:share\/)?story\/([^/?#]+)$/);
   if (!match) return '';
   try {
     return decodeURIComponent(match[1]);

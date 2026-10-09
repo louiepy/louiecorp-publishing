@@ -13,7 +13,10 @@ permissions:
 jobs:
   newsroom:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 30
+    concurrency:
+      group: louiecorp-newsroom-scheduled
+      cancel-in-progress: false
 
     steps:
       - name: Check out LouieCorp
@@ -28,6 +31,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install fpdf2 pillow
+
+      - name: Run newsroom regression tests
+        run: |
+          python -m unittest discover -s tests -v
+          node --test tests/test_worker_bot_auth.js
 
       - name: Verify media bot secret is present
         env:
@@ -47,4 +55,21 @@ jobs:
           MEDIA_WORKER_URL: ${{ secrets.MEDIA_WORKER_URL }}
           MEDIA_BOT_SECRET: ${{ secrets.MEDIA_BOT_SECRET }}
           AUTO_PUBLISH: "true"
-        run: python -m newsroom.main
+        shell: bash
+        run: |
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            echo "LouieCorp newsroom attempt ${attempt}/3"
+            if python -m newsroom.main; then
+              echo "Newsroom completed successfully."
+              exit 0
+            else
+              code=$?
+            fi
+            echo "Newsroom attempt ${attempt} failed (exit ${code})." >&2
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 20))
+            fi
+          done
+          echo "All newsroom attempts failed. The next scheduled run remains enabled." >&2
+          exit 1

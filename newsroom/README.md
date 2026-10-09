@@ -10,7 +10,7 @@ This is a server-side newsroom runner. It is intentionally separate from the pub
 - Remaining automated slots are current-affairs news.
 - Three is a ceiling, not a quota. The runner skips a slot when it cannot meet the research, verification, originality, importance, or real-image requirements.
 - Manual publishing from `/admin` is independent and is **not counted** against the automated ceiling.
-- Automated covers must come from an approved real-photo source. AI image generation is not used.
+- Automated covers must come from approved Wikimedia Commons or Unsplash image hosts. The Worker validates the source host and final redirect, image content type, and upload size; transient network/Worker failures are retried. AI image generation is not used.
 - When `AUTO_PUBLISH=true`, a successful publication also generates the newspaper PDF, uploads it to R2 through `/bot-media/pdfs/`, and stores `pdf_url`. PDF failure does not roll back the article.
 - The initial workflow creates **drafts only**. `AUTO_PUBLISH=true` can be enabled later after real-world testing.
 
@@ -45,6 +45,10 @@ npx wrangler deploy
 ```
 
 A missing Worker secret now fails closed with HTTP 500 (`MEDIA_BOT_SECRET is not configured on the Worker.`). A present but mismatched secret still returns HTTP 401 (`Bot authentication failed.`). Never put the value in `wrangler.toml` or browser JavaScript.
+
+## Worker update after code changes
+
+Whenever `worker/index.js` changes, redeploy the Worker once from the `worker/` directory with `npx wrangler deploy`. GitHub Actions cannot update an already deployed Cloudflare Worker merely by running the Python newsroom. The current fix includes the approved image-host validation and must be deployed to the live Worker before the next scheduled run.
 
 ## First test
 
