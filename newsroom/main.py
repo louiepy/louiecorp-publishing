@@ -357,7 +357,10 @@ def candidate_is_eligible(
     if uganda_needed and not is_uganda(candidate):
         return False
 
-    if candidate['importance_score'] < MIN_IMPORTANCE:
+    if (
+        not uganda_needed
+        and candidate['importance_score'] < MIN_IMPORTANCE
+    ):
         return False
 
     duplicate = find_duplicate(
@@ -497,6 +500,18 @@ def main(mode='auto'):
                 uganda_needed,
             ):
                 continue
+
+            if (
+                uganda_needed
+                and candidate['importance_score']
+                < MIN_IMPORTANCE
+            ):
+                print(
+                    'Uganda candidate below importance '
+                    'filter still being researched: '
+                    f'{candidate.get("title", "")} '
+                    f'(score {candidate["importance_score"]})'
+                )
 
             print(
                 f'Researching candidate '
@@ -685,9 +700,12 @@ def main(mode='auto'):
             'published'
             if (
                 AUTO_PUBLISH
-                and selected['importance_score']
-                >= MIN_IMPORTANCE
                 and len(sources) >= 2
+                and (
+                    selected['importance_score']
+                    >= MIN_IMPORTANCE
+                    or uganda_needed
+                )
             )
             else 'draft'
         )
@@ -868,9 +886,11 @@ def main(mode='auto'):
         ):
             print(
                 'NEWSROOM SKIP: no qualifying '
-                'candidate was available for this slot.'
+                'candidate was available for this slot. '
+                'This empty run is not a successful '
+                'publication.'
             )
-            return 0
+            return 1
 
         traceback.print_exc()
 

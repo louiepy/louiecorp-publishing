@@ -177,6 +177,121 @@ class ResearchTests(unittest.TestCase):
             all(len(item['text']) >= 140 for item in packet)
         )
 
+    def test_homepage_url_is_not_an_article(self):
+        self.assertTrue(
+            research.is_homepage_url('https://www.softpower.ug/')
+        )
+        self.assertTrue(
+            research.is_homepage_url('https://www.monitor.co.ug')
+        )
+        self.assertTrue(
+            research.is_homepage_url('https://www.newvision.co.ug/news')
+        )
+        self.assertFalse(
+            research.is_homepage_url(
+                'https://www.monitor.co.ug/uganda/news/national/story-123'
+            )
+        )
+
+    def test_rejects_publisher_homepage_as_source(self):
+        rss = '''<?xml version="1.0"?>
+        <rss xmlns:media="http://search.yahoo.com/mrss/">
+          <channel>
+            <item>
+              <title>Uganda update - SoftPower News</title>
+              <link>https://news.google.com/rss/articles/hp1</link>
+              <description><![CDATA[<a href="https://www.softpower.ug/">Read</a> Homepage teaser copy about Uganda parliament with extra narrative padding so fallback length would otherwise pass editorial evidence checks for this source.]]></description>
+              <media:source url="https://www.softpower.ug">SoftPower News</media:source>
+            </item>
+            <item>
+              <title>Uganda update - Daily Monitor</title>
+              <link>https://news.google.com/rss/articles/hp2</link>
+              <description><![CDATA[<a href="https://www.monitor.co.ug">Read</a> Another homepage teaser about the same Uganda policy debate with enough padded descriptive text that fallback evidence would look usable if the URL were accepted.]]></description>
+              <media:source url="https://www.monitor.co.ug">Daily Monitor</media:source>
+            </item>
+          </channel>
+        </rss>'''
+
+        def fake_request(url, **kwargs):
+            host = urllib.parse.urlparse(url).netloc.lower()
+            if 'news.google.com/rss/search' in url:
+                return 200, {}, rss.encode('utf-8')
+            if host == 'api.gdeltproject.org':
+                return 200, {}, b'{"articles":[]}'
+            return 200, {'Content-Type': 'text/html'}, long_html(
+                'Homepage listing'
+            )
+
+        candidate = {
+            'title': 'Uganda policy update',
+            'url': 'https://www.softpower.ug/',
+            'description': 'Initial report',
+            'published': '',
+            'publisher': 'SoftPower News',
+        }
+
+        with patch(
+            'newsroom.research.request',
+            side_effect=fake_request,
+        ):
+            packet = research.research(
+                candidate,
+                max_sources=6,
+            )
+
+        self.assertEqual(0, len(packet))
+
+    def test_rejects_syndicated_copies_as_independent(self):
+        shared = (
+            'Parliament in Kampala approved the same policy measure '
+            'after a lengthy debate covering costs, hearings, opposition '
+            'criticism, ministerial replies, and district timelines '
+            'across Uganda with identical wire copy repeated here. '
+        )
+        rss = f'''<?xml version="1.0"?>
+        <rss xmlns:media="http://search.yahoo.com/mrss/">
+          <channel>
+            <item>
+              <title>Uganda bill - Outlet One</title>
+              <link>https://news.google.com/rss/articles/s1</link>
+              <description><![CDATA[<a href="https://one.example/uganda/bill">Read</a> {shared}]]></description>
+              <media:source url="https://one.example">Outlet One</media:source>
+            </item>
+            <item>
+              <title>Uganda bill - Outlet Two</title>
+              <link>https://news.google.com/rss/articles/s2</link>
+              <description><![CDATA[<a href="https://two.example/uganda/bill">Read</a> {shared}]]></description>
+              <media:source url="https://two.example">Outlet Two</media:source>
+            </item>
+          </channel>
+        </rss>'''
+
+        def fake_request(url, **kwargs):
+            if 'news.google.com/rss/search' in url:
+                return 200, {}, rss.encode('utf-8')
+            if 'api.gdeltproject.org' in url:
+                return 200, {}, b'{"articles":[]}'
+            return 403, {'Content-Type': 'text/html'}, b''
+
+        candidate = {
+            'title': 'Uganda bill',
+            'url': 'https://news.google.com/rss/articles/start',
+            'description': 'Initial report',
+            'published': '',
+            'publisher': '',
+        }
+
+        with patch(
+            'newsroom.research.request',
+            side_effect=fake_request,
+        ):
+            packet = research.research(
+                candidate,
+                max_sources=6,
+            )
+
+        self.assertEqual(1, len(packet))
+
 
 if __name__ == '__main__':
     unittest.main()

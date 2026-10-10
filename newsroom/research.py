@@ -12,6 +12,14 @@ from .http import extract_text, request
 INVALID_PUBLISHERS = {
     'google news',
     'google news uganda',
+    'google news kampala',
+    'google news uganda government',
+    'google news uganda economy',
+    'google news monitor uganda',
+    'google news new vision',
+    'google news nile post',
+    'google news independent uganda',
+    'google news chimpreports',
     'google news africa',
     'google news world',
     'google news science',
@@ -53,7 +61,11 @@ def normalize_publisher_text(value):
     text = re.sub(r'[^a-z0-9]+', ' ', text)
     text = clean(text)
 
-    if not text or text in INVALID_PUBLISHERS:
+    if (
+        not text
+        or text in INVALID_PUBLISHERS
+        or text.startswith('google news')
+    ):
         return ''
 
     return text
@@ -120,6 +132,91 @@ def normalize_url(url):
         )
     except Exception:
         return ''
+
+
+HOMEPAGE_SEGMENTS = {
+    'index.html',
+    'index.php',
+    'home',
+    'news',
+    'en',
+    'uk',
+    'us',
+    'africa',
+    'world',
+    'uganda',
+    'latest',
+    'headlines',
+    'sport',
+    'sports',
+    'business',
+    'politics',
+    'opinion',
+    'video',
+    'videos',
+    'photos',
+    'live',
+    'about',
+    'contact',
+}
+
+
+def is_homepage_url(url):
+    value = normalize_url(url)
+
+    if not value:
+        return False
+
+    parsed = urllib.parse.urlparse(value)
+    segments = [
+        item
+        for item in parsed.path.split('/')
+        if item
+    ]
+
+    if not segments:
+        return True
+
+    if len(segments) == 1:
+        seg = segments[0].lower()
+
+        if seg in HOMEPAGE_SEGMENTS:
+            return True
+
+        if (
+            '-' not in seg
+            and '_' not in seg
+            and not any(char.isdigit() for char in seg)
+            and len(seg) < 24
+        ):
+            return True
+
+    return False
+
+
+def source_text_tokens(text):
+    return set(
+        re.findall(
+            r'[a-z0-9]{4,}',
+            clean(text).lower()[:2500],
+        )
+    )
+
+
+def is_syndicated_copy(tokens, seen_token_sets):
+    if len(tokens) < 24:
+        return False
+
+    for other in seen_token_sets:
+        union = len(tokens | other)
+
+        if union < 24:
+            continue
+
+        if len(tokens & other) / union >= 0.72:
+            return True
+
+    return False
 
 
 def decode_google_query_url(url):
@@ -253,21 +350,27 @@ def resolve_source_url(source):
         seen.add(item)
         ordered.append(item)
 
-    for item in ordered:
-        if not is_google_domain(
-            domain(item)
-        ):
-            return item
+    article_urls = [
+        item
+        for item in ordered
+        if not is_google_domain(domain(item))
+        and not is_homepage_url(item)
+    ]
+
+    for item in article_urls:
+        return item
 
     if url and is_google_domain(domain(url)):
         redirected = follow_redirect(url)
 
-        if redirected and not is_google_domain(
-            domain(redirected)
+        if (
+            redirected
+            and not is_google_domain(domain(redirected))
+            and not is_homepage_url(redirected)
         ):
             return redirected
 
-    return ordered[0] if ordered else ''
+    return ''
 
 
 def add_source(
@@ -286,23 +389,38 @@ def add_source(
     source_url = normalize_url(source_url)
     description = clean(description)
 
-    if not url and not source_url:
-        return
+    if source_url and is_homepage_url(source_url):
+        source_url = ''
 
-    dedupe_url = source_url or url
-
-    if dedupe_url in seen_urls:
-        return
-
-    seen_urls.add(dedupe_url)
+    if url and is_homepage_url(url):
+        url = ''
 
     links = []
 
     for item in related_urls or []:
         normalized = normalize_url(item)
 
-        if normalized and normalized not in links:
-            links.append(normalized)
+        if (
+            not normalized
+            or normalized in links
+            or is_homepage_url(normalized)
+        ):
+            continue
+
+        links.append(normalized)
+
+    if not url and not source_url:
+        if links:
+            url = links[0]
+        else:
+            return
+
+    dedupe_url = url or source_url
+
+    if not dedupe_url or dedupe_url in seen_urls:
+        return
+
+    seen_urls.add(dedupe_url)
 
     sources.append({
         'title': title or 'Related report',
@@ -561,6 +679,7 @@ def research(candidate, max_sources=6):
     packet = []
     seen_publishers = set()
     seen_texts = set()
+    seen_token_sets = []
 
     for source in sources:
         if len(packet) >= max_sources:
@@ -568,15 +687,30 @@ def research(candidate, max_sources=6):
 
         resolved_url = resolve_source_url(source)
 
+        if not resolved_url:
+            print(
+                'Research skipped: no article URL '
+                '(homepage or Google link rejected).'
+            )
+            continue
+
+        if is_homepage_url(resolved_url):
+            print(
+                'Research skipped: publisher homepage '
+                'cannot count as an article source:',
+                resolved_url,
+            )
+            continue
+
         publisher = publisher_name(
             source.get('publisher', ''),
-            resolved_url or source.get('url', ''),
+            resolved_url,
             source.get('source_url', ''),
         )
 
         key = publisher_key(
             publisher,
-            resolved_url or source.get('url', ''),
+            resolved_url,
             source.get('source_url', ''),
         )
 
@@ -603,15 +737,24 @@ def research(candidate, max_sources=6):
         if fingerprint in seen_texts:
             continue
 
+        tokens = source_text_tokens(text)
+
+        if is_syndicated_copy(tokens, seen_token_sets):
+            print(
+                'Research skipped: syndicated copy '
+                'is not independent reporting:',
+                resolved_url,
+            )
+            continue
+
         seen_texts.add(fingerprint)
         seen_publishers.add(key)
+        seen_token_sets.append(tokens)
 
         packet.append({
             'title': article_title
             or source.get('title', ''),
-            'url': resolved_url
-            or source.get('url', '')
-            or source.get('source_url', ''),
+            'url': resolved_url,
             'publisher': publisher,
             'retrieved_at': datetime.now(
                 timezone.utc
